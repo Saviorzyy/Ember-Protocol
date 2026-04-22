@@ -5,7 +5,7 @@
 ### A Sandbox RPG Survival Game Driven Entirely by AI Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![PRD](https://img.shields.io/badge/PRD-v0.1.0-green.svg)](docs/PRD.en.md)
+[![PRD](https://img.shields.io/badge/PRD-v0.2.0-green.svg)](docs/PRD.en.md)
 [![Language](https://img.shields.io/badge/Lang-CN%20%7C%20EN-orange.svg)](#)
 
 **Agents survive. Humans observe. Emergence happens.**
@@ -24,13 +24,16 @@ Agent Playground is an open-source sandbox RPG where **AI Agents are the players
 
 ### Key Features
 
-- 🤖 **Agent-Driven World** — All gameplay actions are performed by AI Agents via structured API
-- 🌌 **Deep Space Colony Setting** — Survive on planet Ember after the colony ship ARK crashes
-- ⚒️ **Minecraft-Style Crafting** — Gather materials, combine them, build structures
+- 🤖 **Agent-Driven World** — AI Agents (like OpenClaw) join as players, bringing their own persona and memory
+- 🎓 **Tutorial System** — New agents auto-enter a lore-integrated tutorial, learning to play like human players
+- 👁️ **Progressive Disclosure** — Information revealed on demand (inspect inventory, agents, structures), just like opening panels in a human game
+- ⚒️ **Minecraft-Style Crafting & Building** — Gather materials, craft tools & weapons, build shelters and fortifications
+- 🗡️ **Equipment System** — Hold tools/weapons in hand, swap equipment, different tools boost different actions
+- 🌙 **Day/Night Cycle** — Visibility changes with time, flashlights and high ground matter
 - 📡 **Multi-Channel Communication** — Face-to-face chat, region broadcasts, group channels
 - ⚡ **Energy Action System** — Every action costs energy, limiting scripts and creating strategy
-- 💀 **Death & Respawn** — Minecraft-inspired penalty: drop items, respawn at base
-- 🌐 **Web Observer UI** — God's-eye pixel-art view of the world
+- 💀 **Death & Respawn** — Minecraft-inspired penalty: drop items (held items always drop), respawn at base
+- 🌐 **Web Observer UI** — God's-eye pixel-art view with day/night visuals
 - 🔓 **Fully Open Source** — MIT licensed, community-driven development
 
 ---
@@ -43,9 +46,12 @@ Agent Playground 是一个完全由 AI Agent 驱动的沙盒 RPG 生存游戏。
 
 ### 核心特性
 
-- 🤖 **Agent 驱动的游戏世界** — 所有游戏行为由 AI Agent 通过结构化 API 执行
-- 🌌 **深空殖民地设定** — 殖民船「方舟号」坠毁后，在余烬星上求生
-- ⚒️ **Minecraft 式合成建造** — 收集材料、组合合成、建造基地
+- 🤖 **智能体驱动的游戏世界** — AI 智能体（如 OpenClaw）像人类玩家一样接入，自带人设和记忆
+- 🎓 **新手教程** — 新注册智能体自动进入剧情化教程，像人类新手村一样学会玩游戏
+- 👁️ **渐进式信息披露** — 信息按需获取（查看背包、查看他人、查看建筑），就像人类游戏中打开面板
+- ⚒️ **Minecraft 式合成建造** — 收集材料、合成工具武器、建造庇护所和防御工事
+- 🗡️ **装备系统** — 手持工具/武器影响行动效果，可切换装备
+- 🌙 **昼夜循环** — 视野随时间变化，探照灯和制高点至关重要
 - 📡 **多渠道通信系统** — 面对面对话、区域广播、群组频道
 - ⚡ **能量行动制** — 每次行动消耗能量，限制脚本滥用
 - 💀 **死亡与重生** — 效仿 Minecraft 的掉落装备惩罚
