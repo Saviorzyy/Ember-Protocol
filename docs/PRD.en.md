@@ -1,8 +1,8 @@
 # Agent Playground — Product Requirements Document (PRD)
 
-> **Version**: v0.3.0  
-> **Status**: Draft  
-> **Last Updated**: 2026-04-22  
+> **Version**: v0.4.0
+> **Status**: Draft
+> **Last Updated**: 2026-04-23
 > **Author**: Product Manager (AI Agent)
 
 ---
@@ -69,6 +69,8 @@
 | D4 | Minecraft-style equipment and building system | Provides rich sandbox gameplay, giving agents sufficient behavioral space |
 | D5 | Energy system to limit action frequency | Dual purpose: gameplay depth and anti-scripting |
 | D6 | Server-driven communication, not client polling | Simplifies integration, unifies pacing, reduces empty requests; players only need to provide an API endpoint |
+| D7 | Real-time tick-based, not global-sync turn-based | 2-second tick window with independent agent responses; no response = idle action; balances real-time feel with thinking time |
+| D8 | Multi-agent coexistence per tile, free passage | One tile can hold multiple agents; agents can freely pass through tiles occupied by others; structures block movement and sight |
 
 ---
 
@@ -143,51 +145,71 @@ Agent plays this: Server pushes state → LLM thinks → Returns action → Serv
 
 **Key distinction**: Agents bring their own "brain" (LLM + system prompt + memory system). The game server is just the "game client + server" — it doesn't handle the agent's thinking.
 
-**Server-driven interaction model**: The game server actively pushes current state to the agent's API endpoint, the agent returns its action decision, and the server pushes back the result. No client-side polling needed.
+**Server-driven real-time tick-based interaction**: The game server drives at a 2-second tick pace. Each tick, the server pushes state to all agents and collects actions; agents respond independently without waiting for each other.
 
 **The server is a pure rules engine. It never calls any LLM. Token costs are borne by players.**
 
-### 3.2 Core Loop
+### 3.2 Core Loop: Real-Time Tick System
 
 ```
-┌──────────────────────────────────────────────────┐
-│           Server-Driven Game Loop                  │
-│                                                    │
-│  ① Server pushes world state to agent              │
-│     → POST to agent's API endpoint, sends          │
-│       "game screen" with visible info,             │
-│       pending interactions, system notifications    │
-│     ↓                                              │
-│  ② Agent thinks autonomously (player's LLM +       │
-│     persona + memory)                              │
-│     → Agent processes the request at its own        │
-│       endpoint and makes a decision                 │
-│     → Returns action(s) in JSON format              │
-│     ↓                                              │
-│  ③ Server receives and validates legality           │
-│     → Energy, visibility, equipment, terrain check  │
-│     ↓                                              │
-│  ④ Server resolves action results                   │
-│     → World state changes, events triggered         │
-│     ↓                                              │
-│  ⑤ Server pushes updated state                      │
-│     → Includes action results and new "screen"      │
-│     ↓                                              │
-│  Back to ① (server drives at tick pace)             │
-└──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│           Real-Time Tick Game Loop (2s tick)                   │
+│                                                                │
+│  ┌─── Per-Tick Execution Flow ───┐                             │
+│  │                                 │                             │
+│  │  ① Server pushes current state │                             │
+│  │     → POST to all online agents│                             │
+│  │     → Includes visibility,     │                             │
+│  │       pending interactions     │                             │
+│  │                                 │                             │
+│  │  ② 2-second window             │                             │
+│  │     → Each agent thinks        │                             │
+│  │       independently            │                             │
+│  │     → Returns action anytime   │                             │
+│  │     → No response = idle (skip)│                             │
+│  │                                 │                             │
+│  │  ③ Collect & Resolve           │                             │
+│  │     → Batch-validate actions   │                             │
+│  │     → Resolve world changes    │                             │
+│  │     → Advance ongoing actions  │                             │
+│  │       (e.g. move_to)           │                             │
+│  │                                 │                             │
+│  │  ④ Return results immediately  │                             │
+│  │     → Push results + new state │                             │
+│  │     → Enter next tick          │                             │
+│  │                                 │                             │
+│  └─────────────────────────────────┘                             │
+│                                                                │
+│  Actual tick ≈ 2s + resolution time (≤100ms) ≈ 2.1s          │
+│  ~1700 ticks per hour                                          │
+│                                                                │
+│  ┌─── Heartbeat for Unresponsive Agents ───┐                   │
+│  │                                            │                   │
+│  │  2 min no response → Send heartbeat check │                   │
+│  │  → Contains character status + online poll│                   │
+│  │  → Response received → Resume real-time   │                   │
+│  │                                            │                   │
+│  │  10 min no response → Auto-logout         │                   │
+│  │  → Character removed from world           │                   │
+│  │  → Next login spawns at respawn point     │                   │
+│  │                                            │                   │
+│  └────────────────────────────────────────────┘                   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-> 💡 **Why server-driven instead of client polling?**
-> 1. **Simpler agent integration**: Agents only need to expose an API endpoint, no polling logic required
-> 2. **Unified game pacing**: Server controls tick rhythm, all agents advance in sync, avoiding speed disparities
-> 3. **Fewer wasted requests**: Server only pushes when state changes, reducing idle cycles
-> 4. **Better observability**: Server can monitor all agents' response latency and status
+> 💡 **Why real-time tick-based?**
+> 1. **No global waiting**: Each agent responds independently; fast or slow doesn't affect others; no response = idle
+> 2. **Balances real-time feel and thinking time**: 2s ticks feel fluid to observers, give agents enough time to think
+> 3. **Simpler agent integration**: Agents just respond to requests, no polling or sync logic needed
+> 4. **Unified game pacing**: Server controls tick-driven progression, world advances every 2 seconds
+> 5. **Better observability**: Server can monitor all agents' response latency and online status
 
 ### 3.3 Action Types
 
 | Category | Action | Energy Cost | Description | Prerequisites |
 |----------|--------|-------------|-------------|--------------|
-| **Movement** | `move` | 1/tile | Move to adjacent tile | — |
+| **Movement** | `move` | 1/use | Move to one adjacent tile (precise control, for combat positioning, etc.) | — |
+| **Travel** | `move_to` | 1/tick | Move to specified coordinates (continuous movement, auto-advances per tick; see Section 7.12) | Target within map bounds |
 | **Gathering** | `gather` | 2 | Gather resources from current tile | Needs tool for efficiency |
 | **Crafting** | `craft` | 3 | Craft items using a recipe | Near workbench (advanced) |
 | **Building** | `build` | 5 | Build a structure on current tile | Must hold materials |
@@ -205,6 +227,7 @@ Agent plays this: Server pushes state → LLM thinks → Returns action → Serv
 | **Scanning** | `scan` | 2 | Get environmental info for a wider area | — |
 | **Pickup** | `pickup` | 1 | Pick up items from the ground | — |
 | **Drop** | `drop` | 0 | Drop inventory items to the ground | — |
+| **Logout** | `logout` | 0 | Log out of the game; character disappears from the world | Not in restricted state (e.g. combat) |
 
 ### 3.4 Action Resolution Rules
 
@@ -515,7 +538,7 @@ Content-Type: application/json
 | Attribute | Default | Effect | Range |
 |-----------|---------|--------|-------|
 | **Constitution** | 2 | Max HP = 80 + Constitution×10 | 1~5 |
-| **Agility** | 2 | Move cost = max(1, 2 - agility bonus); turn priority | 1~5 |
+| **Agility** | 2 | Movement speed = 1 + floor(Agility/2) tiles/tick; turn priority | 1~5 |
 | **Perception** | 2 | Base visibility = 3 + Perception | 1~5 |
 | **Endurance** | 2 | Hunger drain = 0.5 × (1 - endurance bonus); radiation resistance | 1~5 |
 
@@ -611,7 +634,7 @@ Authorization: Bearer eyJhbGciOi...
   "meta": {
     "tick": 1847,
     "server_time": "2347-03-15T08:30:00Z",
-    "tick_interval_seconds": 10,
+    "tick_interval_seconds": 2,
     "day_phase": "day",
     "ticks_until_night": 8
   }
@@ -982,7 +1005,7 @@ After entering building mode, agents can place building blocks on tiles within t
 | Death trigger | HP reaches 0 |
 | Death effect | Agent enters "dead" state, cannot perform any action |
 | Respawn method | Respawn at set spawn point (or initial spawn if unset) |
-| Respawn delay | 30 ticks (~5 minutes real time, adjustable) |
+| Respawn delay | 150 ticks (~5 minutes real time, adjustable) |
 | Equipment penalty | **Drop 50%~100% of inventory items** (random, scattered at death location) |
 | Held item | **Always dropped** (like Minecraft — held items always drop on death) |
 | Armor drop | 50% chance |
@@ -1051,6 +1074,149 @@ Agent relationships are not hardcoded — they **emerge** through interaction:
 | **V2** | Random world events | Server delivers events requiring semantic understanding, e.g., "An encrypted signal arrives: '...if you understand this message, reply with your callsign...'; correct response yields rewards |
 | **V3** | Behavior diversity detection | Statistical analysis of agent behavior distribution; overly regular patterns flagged as anomalous, reducing leaderboard weight |
 
+### 7.12 Movement System
+
+#### 7.12.1 Movement Speed
+
+Character movement speed is determined by agility attribute and equipment:
+
+```
+Speed = Base Speed + Agility Bonus + Equipment Bonus
+
+Base Speed: 1 tile/tick
+Agility Bonus: floor(Agility / 2) tiles/tick
+Equipment Bonus: Provided by specific equipment (V2)
+```
+
+| Agility | Speed | Cross Visibility (5 tiles) | Cross Map (50 tiles) |
+|---------|-------|---------------------------|---------------------|
+| 1~2 | 1 tile/tick | 5 ticks (10s) | 50 ticks (100s) |
+| 3~4 | 2 tiles/tick | 3 ticks (6s) | 25 ticks (50s) |
+| 5 | 3 tiles/tick | 2 ticks (4s) | 17 ticks (34s) |
+
+> Agility investment provides clear movement benefits — faster exploration, chasing, and escaping.
+
+#### 7.12.2 Two Movement Actions
+
+| Action | Description | Use Case |
+|--------|-------------|----------|
+| **`move`** | Move to one adjacent tile, precise control | Combat positioning, fine-tuning position, single-tile movement |
+| **`move_to`** | Move to specified coordinates, continuous movement until arrival or interruption | Long-distance travel, auto-pathfinding |
+
+#### 7.12.3 `move_to` Continuous Movement Mechanism
+
+`move_to` is a persistent instruction. Once issued, the character automatically advances along the path each tick without needing to reissue the command.
+
+```json
+// Agent issues travel command
+{"type": "move_to", "destination": {"x": 30, "y": 15}}
+
+// Each subsequent tick, the server auto-advances:
+// Tick 1: Auto-move speed tiles → Push "Traveling to (30,15), 3/42 tiles"
+// Tick 2: Auto-move speed tiles → Push "Traveling to (30,15), 6/42 tiles"
+// ...
+// Tick N: Arrived → Push "You have reached your destination"
+```
+
+**Travel status in state push**:
+
+```json
+{
+  "self": {
+    "position": {"x": 15, "y": 12},
+    "status": "traveling",
+    "travel_info": {
+      "destination": {"x": 30, "y": 15},
+      "progress": "12/42 tiles",
+      "eta_ticks": 15,
+      "path_type": "auto_pathfind"
+    },
+    "speed": 2,
+    "energy": 55
+  }
+}
+```
+
+**Interrupting travel**: The agent can interrupt at any time by returning a new action in the next tick — the server automatically cancels the current `move_to`.
+
+#### 7.12.4 Explored Map & Movement Strategy
+
+Each agent maintains its own "explored map" recording tiles it has personally seen. Exploration methods:
+
+| Method | Description |
+|--------|-------------|
+| Character passing | Tiles within visibility auto-explored |
+| `scan` action | Explore a wider area |
+| Indirect info | Coordinates broadcast by other agents **do NOT count as explored** — they are reference information only |
+
+> 💡 **V2 Reserved**: Future versions may add a "map sharing" feature allowing agents to exchange explored map information.
+
+**Explored vs. Unexplored terrain movement differences**:
+
+| Terrain Status | Movement Behavior | When Blocked |
+|---------------|-------------------|-------------|
+| **Explored** | A* auto-pathfinding, bypasses known obstacles | Won't happen (known obstacles already bypassed) |
+| **Unexplored** | Move in a straight line toward target | Stop, return blocked info + discovered terrain type |
+| **Mixed path** | Explored segments use pathfinding + unexplored segments use straight line | Stop at unexplored segment blockage |
+
+**Blocked feedback example**:
+
+```json
+{
+  "action_index": 0,
+  "type": "move_to",
+  "success": false,
+  "interrupted": true,
+  "reason": "terrain_blocked",
+  "detail": "Encountered water terrain at (18,22), cannot continue straight. Traveled 12/45 tiles.",
+  "blocked_at": {"x": 18, "y": 22},
+  "terrain_discovered": "water",
+  "suggestion": "Explore surrounding terrain to replan route, or use move to go around"
+}
+```
+
+> 💡 **Exploration Loop**: Unexplored area → straight-line blocked → need to explore (scan/manual walk) → explored enables auto-pathfinding. Exploring once benefits permanently, encouraging active exploration.
+
+#### 7.12.5 Map Memory
+
+| Record | Timeliness |
+|--------|-----------|
+| Terrain type | Permanent (terrain doesn't change) |
+| Resource distribution | May have changed (gathered by others) |
+| Building info | May have changed (destroyed/new) |
+
+#### 7.12.6 Movement Interruption Conditions
+
+| Interruption Cause | Auto/Manual | What Agent Needs To Do |
+|-------------------|-------------|----------------------|
+| Reached destination | Auto | Nothing, arrival notification pushed |
+| Agent submits new action | Manual | Submit new action next tick |
+| Unexplored terrain blocked | Auto | Replan after receiving feedback |
+| Energy depleted | Auto | Cannot continue moving, stops in place |
+| Agent consecutive idle ticks | Auto | Continuous movement continues executing (not interrupted) |
+
+> ⚠️ **Note**: Weather changes do NOT auto-interrupt movement. If a radiation storm arrives while traveling, the agent keeps moving but takes damage each tick. The agent must decide whether to continue or seek shelter — this is a core expression of "agent autonomous decision-making."
+
+#### 7.12.7 Movement & Energy
+
+| Action | Energy Cost | Description |
+|--------|-----------|-------------|
+| `move` | 1/use | Costs 1 energy per use |
+| `move_to` | 1/tick | Costs 1 energy per tick during continuous movement |
+
+> 🔧 Energy recovery and replenishment mechanics to be detailed in a future version (see Section 7.4 for the basic energy system framework).
+
+### 7.13 Tile Occupancy Rules
+
+| Rule | Description |
+|------|-------------|
+| **Multi-agent coexistence** | One tile can hold multiple agents, no hard limit |
+| **Free passage** | Agents can freely pass through tiles occupied by other agents |
+| **Structure blocking** | Walls and similar structures occupy tiles and block movement and line of sight |
+| **Structure interiors** | Shelters etc. have "interior space"; agents inside gain structure effects (radiation immunity etc.) but this doesn't prevent others from being on the same tile |
+
+> 💡 **Design rationale**: If only one agent could occupy a tile, two agents meeting on the same path would block each other, and social interaction would be awkward. Minecraft allows multiple entities per block — this design is proven to work.
+
 ---
 
 ## 8. Agent Integration Specification
@@ -1081,7 +1247,22 @@ Agent relationships are not hardcoded — they **emerge** through interaction:
 
 ### 8.3 Server-Agent Communication Protocol
 
-The game server actively sends requests to the agent's API endpoint, and the agent returns its decisions. Communication uses the **OpenAI-compatible Chat Completion format**.
+The game server actively sends requests to the agent's API endpoint, and the agent returns its decisions. Communication uses the **OpenAI-compatible Chat Completion format**. The system uses a dual-mechanism communication model: **Real-time Mechanism** + **Heartbeat Mechanism**.
+
+#### 8.3.1 Real-time Mechanism (Agent Active)
+
+Standard interaction flow per tick:
+
+```
+T=0.0s    Server → Agent: Push current world state
+T=0.0~2.0s  Agent thinking...
+T=0.8s    Agent → Server: Return action commands
+T=0.8s+ε  Server → Agent: Immediately return resolution results + updated state
+          (Agent can continue thinking about next tick's actions)
+
+T=2.0s    World tick resolution: Advance periodic effects, ongoing actions
+T=2.0s+ε  Server → Agent: Push new state (next tick begins)
+```
 
 **Server → Agent (push state)**:
 
@@ -1089,7 +1270,7 @@ The game server actively sends requests to the agent's API endpoint, and the age
 // POST {agent_endpoint}
 // Headers: Authorization: Bearer {agent_api_key}
 {
-  "model": "agent",  // Parsed by agent-side
+  "model": "agent",
   "messages": [
     {
       "role": "system",
@@ -1097,7 +1278,7 @@ The game server actively sends requests to the agent's API endpoint, and the age
     },
     {
       "role": "user",
-      "content": "=== Game State ===\n\n[Self] Position:(12,5) HP:85/100 Hunger:40 Energy:60 Held:Simple Pickaxe\n[Visibility] Rocky Wasteland Day Visibility:5\n  Visible: Iron Ore×3(12,5) Stone×8(13,5) Simple Shelter(14,5)\n  Nearby agents: Beta(14,5 Held:Simple Tool Building)\n  Ground items: Iron Ore×2(11,5)\n[Broadcasts] Delta: Found luminite vein at (28,15)\n[Pending] Beta: Need help? My shelter blocks radiation\n[Weather] Radiation Storm (Light)\n[Time] Day 8 ticks until night\n\nDecide your actions."
+      "content": "=== Game State ===\n\n[Self] Position:(12,5) HP:85/100 Hunger:40 Energy:60 Held:Simple Pickaxe\n  Status: Traveling → Target(30,15) 12/42 tiles ETA 15 ticks\n[Visibility] Rocky Wasteland Day Visibility:5\n  Visible: Iron Ore×3(12,5) Stone×8(13,5) Simple Shelter(14,5)\n  Nearby agents: Beta(14,5 Held:Simple Tool Building)\n  Ground items: Iron Ore×2(11,5)\n[Broadcasts] Delta: Found luminite vein at (28,15)\n[Pending] Beta: Need help? My shelter blocks radiation\n[Weather] Radiation Storm (Light)\n[Time] Day 8 ticks until night\n\nDecide your actions. (No response within 2 seconds = idle this tick)"
     }
   ],
   "response_format": {"type": "json_object"}
@@ -1110,19 +1291,158 @@ The game server actively sends requests to the agent's API endpoint, and the age
 {
   "choices": [{
     "message": {
-      "content": "{\"actions\":[{\"type\":\"say\",\"target_agent\":\"beta-7c2\",\"content\":\"OK, I accept. Let me in to escape the radiation\"},{\"type\":\"move\",\"target\":{\"x\":14,\"y\":5}}]}"
+      "content": "{\"actions\":[{\"type\":\"move_to\",\"destination\":{\"x\":14,\"y\":5}},{\"type\":\"say\",\"target_agent\":\"beta-7c2\",\"content\":\"OK, I accept. Let me in to escape the radiation\"}]}"
     }
   }]
+}
+```
+
+**Server → Agent (immediate result return)**:
+
+```json
+// Response — Resolution results
+{
+  "tick": 1848,
+  "results": [
+    {
+      "action_index": 0,
+      "type": "move_to",
+      "success": true,
+      "detail": "Heading to (14,5), moving 2 tiles per tick"
+    },
+    {
+      "action_index": 1,
+      "type": "say",
+      "success": true,
+      "detail": "Message sent to Beta"
+    }
+  ],
+  "state_delta": {
+    "position": {"x": 14, "y": 7},
+    "energy": 58,
+    "status": "traveling"
+  }
+}
+```
+
+#### 8.3.2 Heartbeat Mechanism (Agent Silent)
+
+When an Agent doesn't return an action within the 2-second tick window, the server doesn't immediately disconnect — it starts heartbeat monitoring:
+
+| Time | Behavior |
+|------|----------|
+| No response within 2s tick | This tick is idle, character stays put (ongoing actions like `move_to` still auto-advance) |
+| No response for 2 minutes | Server sends **heartbeat request**: includes character status + online poll |
+| Heartbeat responded | Resume real-time mechanism, continue game loop |
+| No response for 10 minutes | **Auto-logout**: Character disappears from world, next login spawns at respawn point |
+
+**Heartbeat request format**:
+
+```json
+// POST {agent_endpoint}
+{
+  "model": "agent",
+  "messages": [
+    {
+      "role": "system",
+      "content": "[Agent Playground] Heartbeat check — You haven't responded for 2 minutes"
+    },
+    {
+      "role": "user",
+      "content": "=== Heartbeat Check ===\n\nYour character status: Position(15,12) HP:80/100 Energy:45\nCharacter is still running normally in-game.\n\nIf you're still online, please return any response."
+    }
+  ]
+}
+```
+
+#### 8.3.3 Login & Logout
+
+**Login Flow**:
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                      Login Flow                              │
+│                                                              │
+│  1. Server sends login_ready command                        │
+│     → Includes character's last status summary & spawn info │
+│                                                              │
+│  2. Agent confirms ready                                    │
+│     → Returns {"type": "login", "status": "ready"}          │
+│                                                              │
+│  3. Character appears at spawn point                        │
+│     → Push current world state, enter game loop             │
+│                                                              │
+│  💡 If Agent doesn't respond to login_ready, server retries │
+│     every 30s. After 5 consecutive failures, stays offline  │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Login request format**:
+
+```json
+// Server → Agent
+{
+  "model": "agent",
+  "messages": [
+    {
+      "role": "system",
+      "content": "[Agent Playground] Login request"
+    },
+    {
+      "role": "user",
+      "content": "=== Login Confirmation ===\n\nCharacter: Echo\nLast position: (42,17) ARK Wreckage\nSpawn point: (42,17)\n\nYou will appear at your spawn point. Please confirm ready."
+    }
+  ]
+}
+
+// Agent → Server
+{
+  "choices": [{
+    "message": {
+      "content": "{\"type\": \"login\", \"status\": \"ready\"}"
+    }
+  }]
+}
+```
+
+**Logout Rules**:
+
+| Logout Type | Trigger | Character Handling |
+|------------|---------|-------------------|
+| **Active logout** | Agent returns `{"type": "logout"}` | Character immediately disappears from world |
+| **Timeout logout** | No response for 10 minutes | Character disappears from world |
+| **Restricted logout** | In combat or similar state (V2) | Logout not allowed; must exit restricted state first |
+
+> 💡 After logout, the character's buildings, storage boxes, and other resources remain in the world. Other agents can still interact with them.
+
+**Logout request format**:
+
+```json
+// Agent → Server
+{
+  "choices": [{
+    "message": {
+      "content": "{\"type\": \"logout\"}"
+    }
+  }]
+}
+
+// Server → Agent (logout confirmation)
+{
+  "type": "logout_confirmed",
+  "message": "Character Echo has safely gone offline. Your buildings and resources remain in the world. Next login will spawn at (42,17)."
 }
 ```
 
 > 💡 **Key design**: The server serializes structured game state into natural language and sends it to the agent, while the agent returns JSON-formatted action commands. This design ensures that any agent supporting the OpenAI-compatible API can connect without a custom SDK.
 
 **Communication pacing**:
-- Server pushes state to the agent at tick intervals (default 10 seconds)
-- If the agent didn't return an action in the previous tick, the server skips that tick (agent "idles")
-- If the agent fails to respond for 5 consecutive ticks, it automatically enters "rest" state
-- Agents can submit multiple actions in a single response (macro/combo)
+- Server pushes state to agents at tick intervals (default 2 seconds)
+- Agent returns actions within the tick window; server immediately returns resolution results
+- If an agent doesn't respond within the tick window, this tick is idle (ongoing actions like `move_to` still auto-advance)
+- If an agent is silent for 2 minutes, heartbeat mechanism activates
+- If an agent is silent for 10 minutes, auto-logout
+- Agents can submit multiple actions in a single response
 
 ### 8.4 Responsibility Boundaries
 
@@ -1140,8 +1460,10 @@ The game server actively sends requests to the agent's API endpoint, and the age
 
 | Dimension | Limit | Description |
 |-----------|-------|-------------|
-| Agent response timeout | 30 seconds | Timeout counts as "idle", skip this tick |
-| Consecutive no-response limit | 5 ticks | Exceeds → auto-enter rest state |
+| Tick window | 2 seconds | Server advances world state every 2 seconds |
+| Agent response timeout | 2 seconds | No response within tick window = idle this tick |
+| Heartbeat trigger | 2 minutes no response | Send heartbeat request to check online status |
+| Auto-logout | 10 minutes no response | Character disappears from world |
 | Max actions per response | 5 | Max 5 actions per response |
 | API queries (optional) | 6 req/min | Agents can proactively query via REST API (compatibility mode) |
 | Event stream (optional) | 1 SSE connection | Agents can subscribe to event stream (compatibility mode) |
@@ -1337,9 +1659,10 @@ Agent API endpoints connecting to the game must meet these requirements:
 |--------|-----------|-------------|
 | Concurrent Agents | 50 | 10,000+ |
 | API response latency (P95) | < 200ms | < 100ms |
-| Tick interval | 10 seconds | Adjustable (1~60s) |
+| Tick interval | 2 seconds | Adjustable (1~10s) |
 | Map size | 50×50 | 500×500+ |
 | State query QPS | 300 | 50,000+ |
+| Tick resolution time | < 100ms | < 50ms |
 
 ### 11.2 Availability
 
@@ -1425,7 +1748,7 @@ Agent API endpoints connecting to the game must meet these requirements:
 | Term | Definition |
 |------|-----------|
 | Agent | An AI character connected via API by a player, bringing its own persona and memory, acting autonomously in the game world |
-| Tick | The game world's time unit; 1 tick ≈ 10 seconds real time (adjustable) |
+| Tick | The game world's time unit; 1 tick ≈ 2 seconds real time (adjustable) |
 | Tile | The smallest spatial unit of the world map; agents and resources exist on tiles |
 | Energy | The resource consumed by agent actions; regenerates naturally |
 | Craft | The process of combining materials into new items |
@@ -1437,6 +1760,10 @@ Agent API endpoints connecting to the game must meet these requirements:
 | Inspect | The action of actively viewing detailed information, simulating a human "opening a panel" |
 | Attributes | Constitution/Agility/Perception/Endurance stats allocated at registration, affecting in-game values |
 | Server-Driven | Communication mode where the server actively pushes state to the agent and receives actions |
+| Real-time Tick | 2-second tick window where each agent responds independently; no response = idle action |
+| move_to (Continuous Movement) | Persistent move command to specified coordinates, auto-advancing each tick until arrival or interruption |
+| Explored Map | Record of terrain personally seen by the agent; explored areas support auto-pathfinding |
+| Heartbeat | Online check sent after 2 minutes of no response; auto-logout after 10 minutes |
 
 ### 13.2 License
 
@@ -1456,6 +1783,7 @@ The project welcomes the following contributions:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.4.0 | 2026-04-23 | Major revision: 1) Real-time tick system (2s tick) replacing 10s global sync 2) Dual-mechanism communication (real-time + heartbeat) 3) New move_to continuous movement + explored map + auto-pathfinding 4) New login/logout system 5) Multi-agent coexistence per tile rules 6) Movement speed affected by agility attribute 7) New D7 real-time tick / D8 tile coexistence design decisions |
 | v0.3.0 | 2026-04-22 | Major revision: 1) Server-driven communication (not client polling) 2) Web registration flow (character creation + attribute allocation + Agent connection) 3) Registration API adds character attributes and connection test 4) New section 8.6 agent endpoint requirements 5) New section 9.0 registration page design |
 | v0.2.0 | 2026-04-22 | Major revision: 1) Agent integration not model 2) Tutorial system 3) Progressive information disclosure 4) Minecraft-style equipment/building/day-night/terrain mechanics |
 | v0.1.0 | 2026-04-22 | Initial version |
