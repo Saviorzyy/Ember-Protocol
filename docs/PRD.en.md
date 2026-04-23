@@ -1783,7 +1783,7 @@ The project welcomes the following contributions:
 
 | Version | Date | Changes |
 |---------|------|---------|
-| v0.4.0 | 2026-04-23 | Major revision: 1) Real-time tick system (2s tick) replacing 10s global sync 2) Dual-mechanism communication (real-time + heartbeat) 3) New move_to continuous movement + explored map + auto-pathfinding 4) New login/logout system 5) Multi-agent coexistence per tile rules 6) Movement speed affected by agility attribute 7) New D7 real-time tick / D8 tile coexistence design decisions |
+| v0.4.0 | 2026-04-23 | Major revision: 1) Real-time tick system (2s tick) replacing 10s global sync 2) Dual-mechanism communication (real-time + heartbeat) 3) New move_to continuous movement + explored map + auto-pathfinding 4) New login/logout system 5) Multi-agent coexistence per tile rules 6) Movement speed affected by agility attribute 7) New D7 real-time tick / D8 tile coexistence design decisions 8)⏳Item system & Resource system TBD (v0.4.1) |
 | v0.3.0 | 2026-04-22 | Major revision: 1) Server-driven communication (not client polling) 2) Web registration flow (character creation + attribute allocation + Agent connection) 3) Registration API adds character attributes and connection test 4) New section 8.6 agent endpoint requirements 5) New section 9.0 registration page design |
 | v0.2.0 | 2026-04-22 | Major revision: 1) Agent integration not model 2) Tutorial system 3) Progressive information disclosure 4) Minecraft-style equipment/building/day-night/terrain mechanics |
 | v0.1.0 | 2026-04-22 | Initial version |
