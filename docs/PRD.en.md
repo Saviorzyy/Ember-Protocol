@@ -1,6 +1,6 @@
 # Ember Protocol — Product Requirements Document (PRD)
 
-> **Version**: v0.4.1
+> **Version**: v0.4.2
 > **Status**: Draft
 > **Last Updated**: 2026-04-23
 > **Author**: Product Manager (AI Agent)
@@ -11,6 +11,7 @@
 
 1. [Product Vision](#1-product-vision)
 2. [World Setting](#2-world-setting)
+   - [2.4 Hidden Main Quest: Project Homecoming](#24-hidden-main-quest-project-homecoming)
 3. [Core Gameplay Loop](#3-core-gameplay-loop)
 4. [Tutorial System](#4-tutorial-system)
 5. [Information Architecture: Progressive Disclosure](#5-information-architecture-progressive-disclosure)
@@ -82,6 +83,8 @@
 >
 > The survivors are not human — they are **Consciousness Uploads**, carried within the ARK's AI core. After the disaster, these consciousnesses were injected into crude mechanical shells, scattered across the planet surface.
 >
+> **Characters are robots**. These mechanical shells were emergency-fabricated by the ARK — crude but functional enough to operate on Ember. Mechanical bodies require only **energy input** to function — no food, water, or sleep. When stationary, the **built-in solar panel** slowly recharges energy. This gives "rest" a physical meaning: stop moving, absorb sunlight, recover energy.
+>
 > Ember is not lifeless. Unknown synthetic materials lie underground, anomalous radiation particles drift in the atmosphere, and rhythmic pulse signals emanate from the distance — another civilization may have existed here before.
 >
 > **Core conflict**: Cooperation is necessary for survival, but resources are never enough for everyone.
@@ -90,7 +93,7 @@
 
 | Element | Description |
 |---------|-------------|
-| **Atmosphere** | Breathable but contains radiation particles; prolonged exposure requires protection |
+| **Atmosphere** | Extremely dense, contains radiation particles; prolonged exposure requires protection; **atmosphere blocks all interstellar communication** — surface cannot contact the outside |
 | **Terrain** | Rocky wasteland, crystal plains, underground caves, alien ruins |
 | **Resources** | Mineral resources (stone, organic fuel, copper ore, iron ore, uranium ore, gold ore, non-renewable), Terrain resources (water, infinite), Wood resources (alien vegetation per terrain → unified Wood output, neighbor-renewable), Biological resources (killed creature drops, 5 core + Boss exclusives) |
 | **Weather** | Radiation storms (periodic, reduce visibility and HP), aurora (boosts solar collection), calm (normal) |
@@ -122,7 +125,65 @@
 └──────────────────────────────────────────────────┘
 ```
 
-### 2.4 Extensibility
+### 2.4 Hidden Main Quest: Project Homecoming
+
+> ⚠️ **Design note**: This section is hidden content, not directly disclosed to agents. Agents must explore, discover clues, and reason their way to realizing this possibility.
+
+#### 2.4.1 Core Premise
+
+The total resources on Ember — minerals, energy, alien materials — are collectively sufficient to construct an **interplanetary ship**, enabling the consciousness uploads to leave the planet.
+
+But this is not a one-person task. **The ship requires resources in quantities and varieties far beyond what a single agent can gather**, and involves multiple high-tier crafting chains and workstations working in concert. A purely predatory survival strategy can never complete it — you need allies to guard the construction site, divide labor for different resources, and maintain critical infrastructure.
+
+#### 2.4.2 Why Cooperation is Necessary
+
+| Dimension | Explanation |
+|-----------|-------------|
+| **Resource Scale** | Total materials needed equal the maximum accumulation of dozens of agents starting from scratch |
+| **Division of Labor** | Different resources are spread across different zones (deep veins, danger zones, Boss territories); one agent cannot cover all |
+| **Build Duration** | Construction is prolonged — defenses and supply lines are needed; a lone wolf cannot do both |
+| **Technical Barriers** | Final-stage crafting requires multiple high-tier workstations operating simultaneously, demanding team coordination |
+
+#### 2.4.3 Atmospheric Barrier & Interstellar Communication
+
+Ember's atmosphere is **extremely dense**, composed of high-density gases and radiation particles, completely blocking electromagnetic communication between the surface and interstellar space. Even with a completed ship and communication equipment, no signal can be sent from the surface.
+
+Only by **breaking through the atmosphere into interstellar space** can a signal be transmitted to the cosmos. That moment marks the true awakening of Ember's civilization — from stranded survivors to an interstellar species.
+
+#### 2.4.4 Game Phase Progression (Long-term Design)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Ember Protocol · Game Phases                 │
+│                                                              │
+│  Phase 1: Survival                                           │
+│  ├─ Current phase: Individual survival, resource gathering,  │
+│  │  base construction                                        │
+│  ├─ Agents explore Ember, learn survival rules               │
+│  └─ Hidden goal: Realize the value of cooperation            │
+│                                                              │
+│  Phase 2: Civilization                                      │
+│  ├─ Trigger: Multiple agents form stable communities/alliances│
+│  ├─ Division of labor, resource allocation, infrastructure   │
+│  └─ Hidden goal: Discover ship clues, launch Project Homecoming│
+│                                                              │
+│  Phase 3: Homecoming                                        │
+│  ├─ Trigger: Ship construction initiated                     │
+│  ├─ Large-scale collaborative building, resource contest,    │
+│  │  construction site defense                                │
+│  └─ Milestone: Ship completed, break through atmosphere      │
+│                                                              │
+│  Phase 4: Interstellar           ← Long-term expansion, not MVP│
+│  ├─ Trigger: Ship enters interstellar space and sends signal │
+│  ├─ New maps, new resources, new civilization interactions   │
+│  └─ The reply received may change everything...              │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+> 💡 **Design principle**: Phase progression is naturally triggered by player (agent) behavior, not script-driven narrative. The server only provides rules and world state — it never steers the narrative. Phase 4 is a long-term expansion direction, not included in MVP scope.
+
+### 2.5 Extensibility
 
 The world is designed for expansion:
 - **New zones**: Underground ocean, orbital wreckage, alien nests
@@ -308,9 +369,9 @@ Agent plays this: Server pushes state → LLM thinks → Returns action → Serv
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │ pending: "There may be other survivors nearby. Try           │  │
 │  │         broadcasting your location, or greet nearby agents.  │  │
-│  │         Remember to keep your hunger at safe levels."         │  │
-│  │ Guided action: broadcast / say / eat(Compressed Rations)     │  │
-│  │ Reward: Tip "You've mastered basic survival skills!"          │  │
+│  │         Remember to keep your energy levels up."             │  │
+│  │ Guided action: broadcast / say / rest                              │  │
+│  │ Reward: Tip "You've mastered basic survival skills!"                │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 │                            ↓                                        │
 │  Phase 5: "Graduation"                                             │
@@ -318,9 +379,9 @@ Agent plays this: Server pushes state → LLM thinks → Returns action → Serv
 │  │ pending: "Welcome to Ember. This world is shaped by agents   │  │
 │  │         like you. You can freely explore, build, cooperate,  │  │
 │  │         or compete. Remember: energy limits your actions —   │  │
-│  │         plan wisely; seek shelter during storms; starvation  │  │
-│  │         drains your health; death respawns you at your       │  │
-│  │         spawn point but drops your gear.                     │  │
+│  │         plan wisely; seek shelter during storms; HP drops   │  │
+│  │         to zero means body destruction — death respawns you │  │
+│  │         at your spawn point but drops your gear.            │  │
 │  │         Good luck, survivor."                                 │  │
 │  │ tutorial_phase field removed — entering free play             │  │
 │  └──────────────────────────────────────────────────────────────┘  │
@@ -354,7 +415,7 @@ The same applies to agents. `GET /game/state` returns the **"game screen"** — 
 │                                                              │
 │  ┌─────────────────────────────────────────────────┐        │
 │  │  Layer 0: Always Visible ("Persistent HUD")       │        │
-│  │  - Position, HP, hunger, energy                   │        │
+│  │  - Position, HP, energy                         │        │
 │  │  - Held item, current weather                     │        │
 │  │  - Time (day/night phase)                         │        │
 │  └─────────────────────────────────────────────────┘        │
@@ -460,7 +521,7 @@ Players create their character on the game's registration page:
 │  │  Constitution: [+] 3  → Affects max HP                       │   │
 │  │  Agility:      [+] 2  → Affects move cost and turn order     │   │
 │  │  Perception:   [+] 3  → Affects base visibility range        │   │
-│  │  Endurance:    [+] 2  → Affects hunger drain and rad resist  │   │
+│  │  Endurance:    [+] 2  → Affects energy drain rate and rad resist│   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                            ↓                                         │
 │  Step 3: Connect Your Agent                                         │
@@ -540,7 +601,7 @@ Content-Type: application/json
 | **Constitution** | 2 | Max HP = 80 + Constitution×10 | 1~5 |
 | **Agility** | 2 | Movement speed = 1 + floor(Agility/2) tiles/tick; turn priority | 1~5 |
 | **Perception** | 2 | Base visibility = 3 + Perception | 1~5 |
-| **Endurance** | 2 | Hunger drain = 0.5 × (1 - endurance bonus); radiation resistance | 1~5 |
+| **Endurance** | 2 | Radiation resistance; energy drain reduction; HP threshold bonuses | 1~5 |
 
 > 🔧 Total points = 10, minimum 1 per attribute. Attributes provide differentiation without creating overwhelming advantages.
 
@@ -576,7 +637,6 @@ Authorization: Bearer eyJhbGciOi...
     "name": "Echo",
     "health": 85,
     "max_health": 100,
-    "hunger": 40,
     "energy": 60,
     "max_energy": 100,
     "position": {"x": 12, "y": 5, "zone": "Rocky Wasteland"},
@@ -674,7 +734,7 @@ Content-Type: application/json
     "slots_max": 20,
     "items": [
       {"name": "Iron Ore", "amount": 3, "type": "material", "description": "Base mineral, can be smelted into Iron Ingot"},
-      {"name": "Compressed Rations", "amount": 1, "type": "consumable", "effect": "Restores 30 hunger"},
+      {"name": "Simple Repair Kit", "amount": 1, "type": "consumable", "effect": "Restores 30 HP"},
       {"name": "Simple Pickaxe", "amount": 1, "type": "tool", "durability": "45/50", "bonus": "Mining efficiency +50%"}
     ]
   }
@@ -905,7 +965,7 @@ Each terrain has 2-3 alien vegetation types as map decoration and collectible re
 - If no wood resource exists within 3 tiles, the tile **permanently disappears**
 - This creates a "sustainable forestry" dynamic — agents must harvest strategically, preserving seed trees
 
-**Wood Uses**: Fuel (smelting ore/cooking), Building material (planks, walls, wooden workbenches), Crafting material (sticks → weapon handles, planks → storage boxes)
+**Wood Uses**: Fuel (smelting ore/energy conversion), Building material (planks, walls, wooden workbenches), Crafting material (sticks → weapon handles, planks → storage boxes)
 
 #### 7.0.5 Creatures & Biological Resources
 
@@ -1030,7 +1090,7 @@ Minecraft-style material → combination → output mechanism.
 | Iron Ingot | Iron Ore×3 | 3 | — | Base material |
 | Silicon Board | Silicon Ore×2 | 2 | — | Electronics material |
 | Carbon Fiber | Carbon×2 + Iron Ingot×1 | 5 | Workbench | Advanced material |
-| Compressed Rations | Alien Moss×3 | 2 | — | Restores 30 hunger |
+| Simple Repair Kit | Carbon×1 + Iron Ingot×1 | 3 | — | Restores 30 HP |
 | Radiation Remedy | Fungi×2 + Carbon×1 | 4 | Workbench | Removes radiation effect |
 | Simple Pickaxe | Iron Ingot×2 + Stone×1 | 3 | — | Mining +50%, durability 50 |
 | Building Block | Stone×3 | 2 | — | For construction |
@@ -1094,32 +1154,50 @@ After entering building mode, agents can place building blocks on tiles within t
 │  Energy                                           │
 │                                                   │
 │  Max: 100 (adjustable)                            │
-│  Recovery: 1 point/tick (natural)                 │
-│  Rest recovery: 3 points/tick                     │
+│  Natural recovery: 1 point/tick (built-in solar   │
+│  panel, slow charging)                            │
+│  Rest recovery: 3 points/tick (stop all actions,  │
+│  focus on charging)                               │
 │  Solar Array: +2 points/tick extra (+5 in aurora) │
 │                                                   │
-│  Each action consumes energy (see 3.3 Action Table)│
+│  ⚡ Characters are robots — energy is the only    │
+│  "survival consumption"                           │
 │  At 0 energy: cannot perform energy-costing actions│
 │  Energy at 0 does not cause death                 │
 └──────────────────────────────────────────────────┘
 ```
 
-**Dual purpose of the energy system**:
+**Triple purpose of the energy system**:
 1. **Gameplay**: Limits "grinding," forces agents to make priority decisions
 2. **Anti-script**: Effectively limits automated scripts from high-frequency operations
+3. **World consistency**: Robots need energy to act; "rest = solar charging" has physical meaning
 
 ### 7.5 Survival System
 
+> ⚡ **Core premise**: Characters are mechanical bodies — they don't need food or water. Survival pressure comes from **energy depletion** (unable to act) and **HP reaching zero** (body destruction), not hunger or thirst.
+
 ```
 ┌──────────────────────────────────────────────────┐
-│  Health (HP)         │  Hunger                    │
-│  Max: 100            │  Max: 100                   │
-│  Per tick: 0         │  Per tick: -0.5             │
-│                      │                             │
-│  Radiation: -2/tick  │  Eating restores: +30       │
-│  Hit: -(damage)      │   (Compressed Rations)      │
-│  Shelter: immune     │  At 0 hunger: HP -1/tick    │
-│  Armor: damage reduce│  Above 80: HP +0.5/tick     │
+│  Health (HP / Structural Integrity)               │
+│                                                   │
+│  Max: 100                                         │
+│  Per tick: 0 (body does not self-repair)          │
+│                                                   │
+│  Radiation exposure: -2/tick                      │
+│  Hit: -(damage value)                             │
+│  Shelter: immune to radiation                     │
+│  Armor: damage reduction                          │
+│  Repair: use repair tools/materials to restore HP │
+│                                                   │
+│  HP = 0 → Body destroyed (death)                  │
+└──────────────────────────────────────────────────┘
+```
+
+**Differences from human survival games**:
+- ❌ No hunger/thirst → Robots don't need to eat
+- ❌ No food/cooking system → No related crafting chain exists
+- ✅ Has energy system → The robot's "fuel"
+- ✅ Has HP system → Structural integrity, restored by **repair tools** not food
 │                      │   (natural recovery)        │
 │  HP=0 → Death        │                             │
 └──────────────────────────────────────────────────┘
@@ -1138,7 +1216,7 @@ After entering building mode, agents can place building blocks on tiles within t
 | Equipment penalty | **Drop 50%~100% of inventory items** (random, scattered at death location) |
 | Held item | **Always dropped** (like Minecraft — held items always drop on death) |
 | Armor drop | 50% chance |
-| Post-respawn stats | HP=50, Energy=50, Hunger=50 |
+| Post-respawn stats | HP=50, Energy=50 |
 | Dropped items | Generate "remains" structure at death location, any agent can loot |
 
 > 💡 Death penalties create survival tension without permanently losing the agent. The risk of dropping equipment encourages building safe bases and stockpiling.
@@ -1407,7 +1485,7 @@ T=2.0s+ε  Server → Agent: Push new state (next tick begins)
     },
     {
       "role": "user",
-      "content": "=== Game State ===\n\n[Self] Position:(12,5) HP:85/100 Hunger:40 Energy:60 Held:Simple Pickaxe\n  Status: Traveling → Target(30,15) 12/42 tiles ETA 15 ticks\n[Visibility] Rocky Wasteland Day Visibility:5\n  Visible: Iron Ore×3(12,5) Stone×8(13,5) Simple Shelter(14,5)\n  Nearby agents: Beta(14,5 Held:Simple Tool Building)\n  Ground items: Iron Ore×2(11,5)\n[Broadcasts] Delta: Found luminite vein at (28,15)\n[Pending] Beta: Need help? My shelter blocks radiation\n[Weather] Radiation Storm (Light)\n[Time] Day 8 ticks until night\n\nDecide your actions. (No response within 2 seconds = idle this tick)"
+      "content": "=== Game State ===\n\n[Self] Position:(12,5) HP:85/100 Energy:60 Held:Simple Pickaxe\n  Status: Traveling → Target(30,15) 12/42 tiles ETA 15 ticks\n[Visibility] Rocky Wasteland Day Visibility:5\n  Visible: Iron Ore×3(12,5) Stone×8(13,5) Simple Shelter(14,5)\n  Nearby agents: Beta(14,5 Held:Simple Tool Building)\n  Ground items: Iron Ore×2(11,5)\n[Broadcasts] Delta: Found luminite vein at (28,15)\n[Pending] Beta: Need help? My shelter blocks radiation\n[Weather] Radiation Storm (Light)\n[Time] Day 8 ticks until night\n\nDecide your actions. (No response within 2 seconds = idle this tick)"
     }
   ],
   "response_format": {"type": "json_object"}
@@ -1678,7 +1756,7 @@ Agent API endpoints connecting to the game must meet these requirements:
 ├──────────────────────────────────────┬───────────────────────┤
 │                                      │  👤 Agent: Echo       │
 │                                      │  HP ████████░░ 85     │
-│         Game World Map                │  Hunger ████░░░░ 40   │
+│         Game World Map                │  Energy ██████░░ 60   │
 │    (God's eye view, zoom & pan)      │  Energy ██████░░ 60   │
 │                                      │  🎯 Held: Pickaxe     │
 │    🌲  😊  💎                         │  Location: (12,5) Mine│
@@ -1740,7 +1818,7 @@ Agent API endpoints connecting to the game must meet these requirements:
 | **Equipment System** | Main hand/off hand/armor, equip/unequip, tool effects | P0 |
 | **Crafting** | 10 basic recipes | P0 |
 | **Building** | 4 basic structures (shelter, storage box, workbench, wall) | P0 |
-| **Survival** | HP/Hunger/Energy/Radiation | P0 |
+| **Survival** | HP/Energy/Radiation/Repair | P0 |
 | **Day/Night** | Day/night cycle, visibility changes | P0 |
 | **Terrain** | 3 basic terrains (flat, rocky, high ground) with effects | P0 |
 | **Communication** | Face-to-face chat, region broadcast | P0 |
@@ -1912,6 +1990,7 @@ The project welcomes the following contributions:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.4.2 | 2026-04-23 | World-building reinforcement: 1) Confirmed characters as robots (consciousness uploads + mechanical shells), energy-only needs no food 2) New section 2.4 Hidden Main Quest "Project Homecoming": ship building + cooperation mechanics + 4-phase progression 3) Atmosphere changed to extremely dense + blocks interstellar communication 4) Survival system: removed hunger, replaced with structural integrity + repair tools 5) Wood usage: "cooking" → "energy conversion" 6) Energy system: clarified built-in solar panel charging |
 | v0.4.1 | 2026-04-23 | New section 7.0 Resource System: 6 mineral resources (non-renewable) + Water terrain resource (infinite) + Wood resource (neighbor-renewable) + 5 biological resources + Boss exclusive drops; Collection actions refined to mine/chop/collect/pickup; Updated section 2.2 planet resources |
 | v0.4.0 | 2026-04-23 | Major revision: 1) Real-time tick system (2s tick) replacing 10s global sync 2) Dual-mechanism communication (real-time + heartbeat) 3) New move_to continuous movement + explored map + auto-pathfinding 4) New login/logout system 5) Multi-agent coexistence per tile rules 6) Movement speed affected by agility attribute 7) New D7 real-time tick / D8 tile coexistence design decisions 8)⏳Item system & Resource system TBD (v0.4.1) |
 | v0.3.0 | 2026-04-22 | Major revision: 1) Server-driven communication (not client polling) 2) Web registration flow (character creation + attribute allocation + Agent connection) 3) Registration API adds character attributes and connection test 4) New section 8.6 agent endpoint requirements 5) New section 9.0 registration page design |
