@@ -1,6 +1,6 @@
 # Ember Protocol — Product Requirements Document (PRD)
 
-> **Version**: v0.4.0
+> **Version**: v0.4.1
 > **Status**: Draft
 > **Last Updated**: 2026-04-23
 > **Author**: Product Manager (AI Agent)
@@ -92,7 +92,7 @@
 |---------|-------------|
 | **Atmosphere** | Breathable but contains radiation particles; prolonged exposure requires protection |
 | **Terrain** | Rocky wasteland, crystal plains, underground caves, alien ruins |
-| **Resources** | Base minerals (iron, silicon, carbon), alien materials (luminite, dark matter fragments), organics (alien moss, fungi) |
+| **Resources** | Mineral resources (stone, organic fuel, copper ore, iron ore, uranium ore, gold ore, non-renewable), Terrain resources (water, infinite), Wood resources (alien vegetation per terrain → unified Wood output, neighbor-renewable), Biological resources (killed creature drops, 5 core + Boss exclusives) |
 | **Weather** | Radiation storms (periodic, reduce visibility and HP), aurora (boosts solar collection), calm (normal) |
 | **Hazards** | Radiation zones, unstable geology (collapses), automated defense systems |
 | **Day/Night** | Ember's rotation is ~20 ticks, affecting visibility range and some creature behavior |
@@ -841,6 +841,135 @@ data: {"type": "server_restart", "eta_minutes": 30, "message": "Server maintenan
 ---
 
 ## 7. Game Systems Design
+
+### 7.0 Resource System
+
+> **Design philosophy**: Resources are the starting point of the game loop — gather → craft → equip → explore deeper → gather rarer resources. Resources are divided into four categories by physical realism — mineral, terrain, wood, and biological — each with different regeneration strategies.
+
+#### 7.0.1 Resource Category Overview
+
+| Category | Count | Regeneration | Collection Method |
+|----------|:-----:|--------------|-------------------|
+| Mineral Resources | 6 types | ❌ Non-renewable | Mining (requires pickaxe) |
+| Terrain Resources | 1 type (Water) | ♾️ Infinite | Collect with tool (does not consume water source) |
+| Wood Resources | 1 type (unified output) | ✅ Neighbor-renewable | Chopping (hand/axe) |
+| Biological Resources | 5 types + Boss exclusives | ✅ Creature respawn drops | Kill & loot |
+
+#### 7.0.2 Mineral Resources (Non-renewable)
+
+| Resource | Rarity | Primary Use | Minimum Tool | Distribution |
+|----------|:------:|-------------|-------------|-------------|
+| Stone | Common | Building material, stone tools | Hand (slow) / any pickaxe | All terrain, surface |
+| Organic Fuel | Common | Burning, crafting energy | Hand (slow) / any pickaxe | Ash Plains / Dead Forest, shallow |
+| Copper Ore | Uncommon | Copper tools/weapons/wiring | Stone pickaxe+ | Rift Valley / Ruins, mid-depth |
+| Iron Ore | Uncommon | Iron tools/weapons/armor | Stone pickaxe+ | Rift Valley / Ruins, deep |
+| Uranium Ore | Rare | Advanced energy/weapons | Iron pickaxe+ | Abyss, extreme depth |
+| Gold Ore | Ultra-rare | Endgame equipment/crafting | Iron pickaxe+ | Abyss, extreme depth, very low probability |
+
+**Mining Hardness Table**:
+
+| Resource | Base Hardness (ticks) | Minimum Tool |
+|----------|:---:|------|
+| Stone | 3 | Hand (x2 time) / any pickaxe |
+| Organic Fuel | 3 | Hand (x2 time) / any pickaxe |
+| Copper Ore | 5 | Stone pickaxe |
+| Iron Ore | 5 | Stone pickaxe |
+| Uranium Ore | 8 | Iron pickaxe |
+| Gold Ore | 8 | Iron pickaxe |
+
+> Tool tier: Hand < Wood Pickaxe < Stone Pickaxe < Iron Pickaxe. Higher-tier tools advance more progress per tick (e.g., iron pickaxe +3 progress/tick). Same ore type has larger veins at greater depth (single tile → multi-tile veins), with a chance of "rich ore tiles" yielding x2 output.
+
+#### 7.0.3 Terrain Resources (Infinite)
+
+| Resource | Collection Method | Distribution |
+|----------|------------------|-------------|
+| Water | Collect with tool, does not consume water source tile | Swamp / Rift Valley water source tiles |
+
+> Characters can collect water from water source tiles using a container. The water source itself is never consumed — it is an infinite resource.
+
+#### 7.0.4 Wood Resources (Neighbor-Renewable)
+
+Each terrain has 2-3 alien vegetation types as map decoration and collectible resources. All vegetation yields a unified output: **Wood**.
+
+| Terrain | Vegetation (decorative names) | Output |
+|---------|------------------------------|--------|
+| Ash Plains | Ember Shrubs, Char Roots | Wood |
+| Dead Forest | Ash Trees, Scorched Vines, Withered Crown Trees | Wood |
+| Rift Valley | Wall Moss, Crevice Fungi | Wood |
+| Swamp | Rot Ferns, Venom Pouch Mushrooms, Swamp Reeds | Wood |
+| Ruins | Remnant Vines, Rubble Moss | Wood |
+| Abyss | Glow Shrooms, Abyss Vines | Wood |
+
+**Regeneration Rules**:
+- When a wood resource tile is harvested, if there is a surviving wood resource tile within **Manhattan distance ≤ 3**, the tile regenerates after 600 ticks (20 minutes)
+- If no wood resource exists within 3 tiles, the tile **permanently disappears**
+- This creates a "sustainable forestry" dynamic — agents must harvest strategically, preserving seed trees
+
+**Wood Uses**: Fuel (smelting ore/cooking), Building material (planks, walls, wooden workbenches), Crafting material (sticks → weapon handles, planks → storage boxes)
+
+#### 7.0.5 Creatures & Biological Resources
+
+**Creature Spawn Rules**:
+
+```
+Spawn Conditions = Terrain type + Mineral proximity + Environmental conditions (brightness/structures)
+Spawn Area = Radius R centered on tiles satisfying conditions
+Area Capacity = min 3, max determined by area size
+Spawn Interval = Normal creatures 300 ticks (10 min), respawn in same area after kill
+MVP Config = 2 creature types per terrain
+```
+
+**Per-Terrain Creature Config (MVP)**:
+
+| Terrain | Creature ① | Creature ② | Spawn Condition |
+|---------|-----------|-----------|----------------|
+| Ash Plains | Ash Crawler | Cindershell Beetle | Default (no special condition) |
+| Dead Forest | Wither-Ape | Thorn Wasp | Wood resource tiles present |
+| Rift Valley | Wall Spider | Crystal Scorpion | Copper/Iron ore nearby |
+| Swamp | Swamp Worm | Acid Frog | Water source nearby |
+| Ruins | Wreck Hound | Rust Moth | Building/ruin structures present |
+| Abyss | Shadow Bat | Abyss Walker | Low brightness |
+
+**5 Core Biological Drop Resources**:
+
+| Biological Resource | Typical Sources | Use |
+|---------------------|----------------|-----|
+| Acid Blood | Ash Crawler, Acid Frog, Swamp Worm | Weapon enchantment (corrosion), advanced crafting |
+| Bio Fuel | Cindershell Beetle, Rust Moth, Shadow Bat | Advanced energy (superior to Organic Fuel) |
+| Organic Toxin | Thorn Wasp, Acid Frog, Swamp Worm | Poison weapons, potions |
+| Organic Fiber | Wither-Ape, Wall Spider, Wreck Hound | Advanced cloth armor, ropes, bandages |
+| Bio Bone | Ash Crawler, Crystal Scorpion, Abyss Walker | Advanced building material, bone tools/weapons |
+
+**Drop Rules**: Each creature drops 1 primary resource (1-2 units) + 50% chance of 1 secondary resource. Drops appear on the tile where the creature was killed, lootable for 300 ticks (10 minutes), then disappear.
+
+#### 7.0.6 Boss Creatures
+
+**Spawn Conditions** (all must be met):
+
+1. Specific rare mineral nearby (uranium/gold ore)
+2. Specific terrain (Abyss / Rift Valley deep)
+3. Specific brightness condition (low brightness / darkness)
+4. Spawn cooldown: 7200 ticks (4 hours game time)
+
+| Boss | Terrain | Mineral Condition | Brightness | Drops (Rare Bio Materials) | Bonus Drops |
+|------|---------|------------------|------------|---------------------------|------------|
+| Veincore Colossus | Abyss | Uranium nearby | Dark | Veincore Heart, Abyss Bone | Uranium Ore x3 |
+| Gold-Crown Matriarch | Rift Valley deep | Gold nearby | Dark | Matriarch Venom Gland, Golden Silk Sac | Gold Ore x2 |
+
+> Boss count will increase in later versions; MVP starts with 2 bosses to validate the loop.
+
+#### 7.0.7 Collection Actions
+
+| Action | Command | Applicable Resources | Duration |
+|--------|---------|---------------------|----------|
+| Mine | `mine` | Mineral resources | Ticks based on hardness |
+| Chop | `chop` | Wood resources | Based on tool tier |
+| Collect Water | `collect` | Water sources | 1 tick |
+| Pickup | `pickup` | Ground drops / stardust | 1 tick |
+
+> The original `gather` action is retained as a generic collection command; the server automatically maps it to `mine`/`chop`/`collect` based on the target resource type.
+
+---
 
 ### 7.1 Equipment & Tool System
 
@@ -1783,6 +1912,7 @@ The project welcomes the following contributions:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.4.1 | 2026-04-23 | New section 7.0 Resource System: 6 mineral resources (non-renewable) + Water terrain resource (infinite) + Wood resource (neighbor-renewable) + 5 biological resources + Boss exclusive drops; Collection actions refined to mine/chop/collect/pickup; Updated section 2.2 planet resources |
 | v0.4.0 | 2026-04-23 | Major revision: 1) Real-time tick system (2s tick) replacing 10s global sync 2) Dual-mechanism communication (real-time + heartbeat) 3) New move_to continuous movement + explored map + auto-pathfinding 4) New login/logout system 5) Multi-agent coexistence per tile rules 6) Movement speed affected by agility attribute 7) New D7 real-time tick / D8 tile coexistence design decisions 8)⏳Item system & Resource system TBD (v0.4.1) |
 | v0.3.0 | 2026-04-22 | Major revision: 1) Server-driven communication (not client polling) 2) Web registration flow (character creation + attribute allocation + Agent connection) 3) Registration API adds character attributes and connection test 4) New section 8.6 agent endpoint requirements 5) New section 9.0 registration page design |
 | v0.2.0 | 2026-04-22 | Major revision: 1) Agent integration not model 2) Tutorial system 3) Progressive information disclosure 4) Minecraft-style equipment/building/day-night/terrain mechanics |
