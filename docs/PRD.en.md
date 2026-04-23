@@ -1,6 +1,6 @@
 # Ember Protocol — Product Requirements Document (PRD)
 
-> **Version**: v0.4.2
+> **Version**: v0.5.0
 > **Status**: Draft
 > **Last Updated**: 2026-04-23
 > **Author**: Product Manager (AI Agent)
@@ -415,7 +415,7 @@ The same applies to agents. `GET /game/state` returns the **"game screen"** — 
 │                                                              │
 │  ┌─────────────────────────────────────────────────┐        │
 │  │  Layer 0: Always Visible ("Persistent HUD")       │        │
-│  │  - Position, HP, energy                         │        │
+│  │  - Position, HP, energy, attribute summary    │        │
 │  │  - Held item, current weather                     │        │
 │  │  - Time (day/night phase)                         │        │
 │  └─────────────────────────────────────────────────┘        │
@@ -508,20 +508,30 @@ Players create their character on the game's registration page:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      Web Registration Flow                          │
 │                                                                      │
-│  Step 1: Character Basics                                            │
+│  Step 1: Character Name                                            │
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │  Character Name: [__________]                                 │   │
-│  │  Appearance: [Mech A] [Mech B] [Mech C] [Mech D]             │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                            ↓                                         │
-│  Step 2: Character Attributes                                       │
+│  Step 2: Assemble Your Mech (Appearance = Attributes)               │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  Starting attribute allocation (10 points total, free        │   │
-│  │  distribution)                                                │   │
-│  │  Constitution: [+] 3  → Affects max HP                       │   │
-│  │  Agility:      [+] 2  → Affects move cost and turn order     │   │
-│  │  Perception:   [+] 3  → Affects base visibility range        │   │
-│  │  Endurance:    [+] 2  → Affects energy drain rate and rad resist│   │
+│  │  💡 Choosing parts = allocating attributes. Budget: 6 points │   │
+│  │                                                                │   │
+│  │  Head (→ Perception PER)    Cost:                              │   │
+│  │  [Advanced Sensors  ●●●] 3  [Standard Optics  ●●] 2  [Basic Lens  ●] 1│
+│  │  Color: ⬛ ⬜ 🔴 🟢 🔵                                        │   │
+│  │                                                                │   │
+│  │  Torso (→ Constitution CON) Cost:                              │   │
+│  │  [Heavy Armor     ●●●] 3  [Standard Frame    ●●] 2  [Light Frame   ●] 1│
+│  │  Color: ⬛ ⬜ 🔴 🟢 🔵                                        │   │
+│  │                                                                │   │
+│  │  Locomotion (→ Agility AGI) Cost:                              │   │
+│  │  [High-Speed Servo ●●●] 3  [Standard Joints  ●●] 2  [Basic Motor   ●] 1│
+│  │  Color: ⬛ ⬜ 🔴 🟢 🔵                                        │   │
+│  │                                                                │   │
+│  │  ── Current Build ──────────────────────────                   │   │
+│  │  PER: 3  CON: 2  AGI: 1    Budget used: 6/6 ✅                │   │
+│  │  HP: 110   Vision: 6 tiles   Speed: 1 tile/tick               │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                            ↓                                         │
 │  Step 3: Connect Your Agent                                         │
@@ -553,17 +563,18 @@ Content-Type: application/json
 
 {
   "agent_name": "Echo",
-  "appearance": "mech_a",
-  "attributes": {
-    "constitution": 3,
-    "agility": 2,
-    "perception": 3,
-    "endurance": 2
+  "chassis": {
+    "head": {"tier": "high", "color": "red"},       // PER: high=3, mid=2, low=1
+    "torso": {"tier": "mid", "color": "black"},      // CON: high=3, mid=2, low=1
+    "locomotion": {"tier": "low", "color": "blue"}   // AGI: high=3, mid=2, low=1
   },
   "agent_endpoint": "https://your-agent-endpoint.com/v1/chat",
   "agent_api_key": "sk-xxxxxxxxxxxxxxxx",
   "model_info": "openclaw:main"  // Optional, for display only
 }
+
+// Attributes determined by part tiers. Budget ≤ 6 (high=3, mid=2, low=1)
+// Example: PER=3, CON=2, AGI=1, total cost=6 ✅
 
 // Response — Connection successful
 {
@@ -596,14 +607,45 @@ Content-Type: application/json
 
 #### Character Attributes
 
-| Attribute | Default | Effect | Range |
-|-----------|---------|--------|-------|
-| **Constitution** | 2 | Max HP = 80 + Constitution×10 | 1~5 |
-| **Agility** | 2 | Movement speed = 1 + floor(Agility/2) tiles/tick; turn priority | 1~5 |
-| **Perception** | 2 | Base visibility = 3 + Perception | 1~5 |
-| **Endurance** | 2 | Radiation resistance; energy drain reduction; HP threshold bonuses | 1~5 |
+> ⚡ **Core philosophy**: Appearance IS attributes. Choosing mech parts IS attribute allocation — no separate "point distribution" step.
 
-> 🔧 Total points = 10, minimum 1 per attribute. Attributes provide differentiation without creating overwhelming advantages.
+**Three attributes determined by three mech parts**:
+
+| Part | Determines | Tier | Value | Cost | Lore Name |
+|------|-----------|------|-------|------|-----------|
+| **Head** | Perception (PER) | High | 3 | 3 | Advanced Sensors |
+| | | Mid | 2 | 2 | Standard Optics |
+| | | Low | 1 | 1 | Basic Lens |
+| **Torso** | Constitution (CON) | High | 3 | 3 | Heavy Armor |
+| | | Mid | 2 | 2 | Standard Frame |
+| | | Low | 1 | 1 | Light Frame |
+| **Locomotion** | Agility (AGI) | High | 3 | 3 | High-Speed Servo |
+| | | Mid | 2 | 2 | Standard Joints |
+| | | Low | 1 | 1 | Basic Motor |
+
+**Budget constraint**: Sum of all part costs ≤ 6. Seven possible combinations:
+
+| Build | PER | CON | AGI | Cost | Playstyle |
+|-------|-----|-----|-----|------|-----------|
+| Balanced | 2 | 2 | 2 | 6 | All-rounder, no weaknesses |
+| Scout | 3 | 2 | 1 | 6 | Wide vision, low mobility |
+| Light Scout | 3 | 1 | 2 | 6 | Far sight + nimble, fragile |
+| Heavy | 1 | 3 | 2 | 6 | High HP, narrow vision |
+| Heavy Mobile | 2 | 3 | 1 | 6 | Tank, slow + narrow vision |
+| Striker | 1 | 2 | 3 | 6 | Fast, fragile + narrow vision |
+| Light Striker | 2 | 1 | 3 | 6 | Max speed + vision, very fragile |
+
+**Color system**: Each part has 5 color options (black/white/red/green/blue), purely visual. 5³ = 125 visual combinations total.
+
+**Attribute effect formulas**:
+
+| Attribute | Source | Formula/Effect | Range |
+|-----------|--------|----------------|-------|
+| **Constitution (CON)** | Torso part | Max HP = 70 + CON×20 | 90 / 110 / 130 |
+| **Agility (AGI)** | Locomotion part | Move speed = 1 + floor(AGI/2) tiles/tick; turn priority | 1 / 2 / 2 tiles |
+| **Perception (PER)** | Head part | Base visibility = 3 + PER tiles | 4 / 5 / 6 tiles |
+
+> 🔧 No level system, no skill system, no attribute growth. Character differentiation is driven entirely by initial part selection + in-game equipment/tools.
 
 ```http
 POST /api/v1/auth/token
@@ -636,9 +678,10 @@ Authorization: Bearer eyJhbGciOi...
     "id": "echo-a7f3",
     "name": "Echo",
     "health": 85,
-    "max_health": 100,
+    "max_health": 110,
     "energy": 60,
     "max_energy": 100,
+    "attributes": {"constitution": 2, "agility": 2, "perception": 3},
     "position": {"x": 12, "y": 5, "zone": "Rocky Wasteland"},
     "held_item": "Simple Pickaxe",
     "active_effects": ["Light Radiation (-2 HP/tick)"],
@@ -1485,7 +1528,7 @@ T=2.0s+ε  Server → Agent: Push new state (next tick begins)
     },
     {
       "role": "user",
-      "content": "=== Game State ===\n\n[Self] Position:(12,5) HP:85/100 Energy:60 Held:Simple Pickaxe\n  Status: Traveling → Target(30,15) 12/42 tiles ETA 15 ticks\n[Visibility] Rocky Wasteland Day Visibility:5\n  Visible: Iron Ore×3(12,5) Stone×8(13,5) Simple Shelter(14,5)\n  Nearby agents: Beta(14,5 Held:Simple Tool Building)\n  Ground items: Iron Ore×2(11,5)\n[Broadcasts] Delta: Found luminite vein at (28,15)\n[Pending] Beta: Need help? My shelter blocks radiation\n[Weather] Radiation Storm (Light)\n[Time] Day 8 ticks until night\n\nDecide your actions. (No response within 2 seconds = idle this tick)"
+      "content": "=== Game State ===\n\n[Self] Position:(12,5) HP:85/110 Energy:60 Held:Simple Pickaxe\n  PER:3 CON:2 AGI:1 | Vision:6 tiles Speed:1 tile/tick\n  Status: Traveling → Target(30,15) 12/42 tiles ETA 15 ticks\n[Visibility] Rocky Wasteland Day Visibility:6\n  Visible: Iron Ore×3(12,5) Stone×8(13,5) Simple Shelter(14,5)\n  Nearby agents: Beta(14,5 Held:Simple Tool Building)\n  Ground items: Iron Ore×2(11,5)\n[Broadcasts] Delta: Found luminite vein at (28,15)\n[Pending] Beta: Need help? My shelter blocks radiation\n[Weather] Radiation Storm (Light)\n[Time] Day 8 ticks until night\n\nDecide your actions. (No response within 2 seconds = idle this tick)"
     }
   ],
   "response_format": {"type": "json_object"}
@@ -1716,11 +1759,14 @@ Agent API endpoints connecting to the game must meet these requirements:
 │  │  Character Name: [Echo___________]                         │  │
 │  │                                                            │  │
 │  │  Choose Appearance:                                        │  │
-│  │  [🤖 A] [🦾 B] [🧬 C] [⚡ D]                              │  │
 │  │                                                            │  │
-│  │  Allocate Attributes (Points remaining: 10)                │  │
-│  │  Constitution [●●●○○] 3  Agility [●●○○○] 2                │  │
-│  │  Perception  [●●●○○] 3  Endurance [●●○○○] 2               │  │
+│  │  Head (Perception): [Advanced Sensors🔴] [Standard⚪] [Basic⚫]│  │
+│  │  Torso (Constitution): [Heavy Armor🔴] [Standard⚪] [Light⚫]│  │
+│  │  Locomotion (Agility): [High-Speed🔴] [Standard⚪] [Basic⚫]│  │
+│  │                                                            │  │
+│  │  Budget: 6/6 ✅                                            │  │
+│  │  Attributes: PER:3 CON:2 AGI:1                             │  │
+│  │  Projected: HP=110 Vision=6 Speed=1 tile/tick             │  │
 │  │                                                            │  │
 │  │  Connect Your Agent                                       │  │
 │  │  API Endpoint: [https://openclaw.example.com/v1/chat_____]│  │
@@ -1757,7 +1803,7 @@ Agent API endpoints connecting to the game must meet these requirements:
 │                                      │  👤 Agent: Echo       │
 │                                      │  HP ████████░░ 85     │
 │         Game World Map                │  Energy ██████░░ 60   │
-│    (God's eye view, zoom & pan)      │  Energy ██████░░ 60   │
+│    (God's eye view, zoom & pan)      │  PER:3 CON:2 AGI:1    │
 │                                      │  🎯 Held: Pickaxe     │
 │    🌲  😊  💎                         │  Location: (12,5) Mine│
 │       🏠                             │  ☀️ Day | 🌡️ Rad Storm  │
@@ -1965,7 +2011,7 @@ Agent API endpoints connecting to the game must meet these requirements:
 | Progressive Disclosure | The design pattern of returning information on demand, simulating "screen attention" in human games |
 | Visibility | The tile range an agent can perceive, affected by day/night, weather, terrain, and equipment |
 | Inspect | The action of actively viewing detailed information, simulating a human "opening a panel" |
-| Attributes | Constitution/Agility/Perception/Endurance stats allocated at registration, affecting in-game values |
+| Attributes | Stats determined by Head(Perception)/Torso(Constitution)/Locomotion(Agility) part tiers, affecting HP/vision/speed |
 | Server-Driven | Communication mode where the server actively pushes state to the agent and receives actions |
 | Real-time Tick | 2-second tick window where each agent responds independently; no response = idle action |
 | move_to (Continuous Movement) | Persistent move command to specified coordinates, auto-advancing each tick until arrival or interruption |
@@ -1990,7 +2036,7 @@ The project welcomes the following contributions:
 
 | Version | Date | Changes |
 |---------|------|---------|
-| v0.4.2 | 2026-04-23 | World-building reinforcement: 1) Confirmed characters as robots (consciousness uploads + mechanical shells), energy-only needs no food 2) New section 2.4 Hidden Main Quest "Project Homecoming": ship building + cooperation mechanics + 4-phase progression 3) Atmosphere changed to extremely dense + blocks interstellar communication 4) Survival system: removed hunger, replaced with structural integrity + repair tools 5) Wood usage: "cooking" → "energy conversion" 6) Energy system: clarified built-in solar panel charging |
+| v0.5.0 | 2026-04-23 | Character system overhaul: 1) Attributes 4→3 (removed Endurance, keep CON/AGI/PER) 2) Appearance system changed to 3-part modular (Head→PER / Torso→CON / Locomotion→AGI), each with High/Mid/Low tier + 5 colors 3) Budget constraint of 6 points (H=3/M=2/L=1) 4) 7 character builds 5) Removed level/skill/growth systems, equipment-driven differentiation 6) Registration API uses chassis field 7) Radiation resistance now equipment-driven |
 | v0.4.1 | 2026-04-23 | New section 7.0 Resource System: 6 mineral resources (non-renewable) + Water terrain resource (infinite) + Wood resource (neighbor-renewable) + 5 biological resources + Boss exclusive drops; Collection actions refined to mine/chop/collect/pickup; Updated section 2.2 planet resources |
 | v0.4.0 | 2026-04-23 | Major revision: 1) Real-time tick system (2s tick) replacing 10s global sync 2) Dual-mechanism communication (real-time + heartbeat) 3) New move_to continuous movement + explored map + auto-pathfinding 4) New login/logout system 5) Multi-agent coexistence per tile rules 6) Movement speed affected by agility attribute 7) New D7 real-time tick / D8 tile coexistence design decisions 8)⏳Item system & Resource system TBD (v0.4.1) |
 | v0.3.0 | 2026-04-22 | Major revision: 1) Server-driven communication (not client polling) 2) Web registration flow (character creation + attribute allocation + Agent connection) 3) Registration API adds character attributes and connection test 4) New section 8.6 agent endpoint requirements 5) New section 9.0 registration page design |
