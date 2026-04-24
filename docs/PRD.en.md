@@ -1,6 +1,6 @@
 # Ember Protocol — Product Requirements Document (PRD)
 
-> **Version**: v0.8.3
+> **Version**: v0.9.0
 > **Status**: Draft
 > **Last Updated**: 2026-04-24
 > **Author**: Product Manager (AI Agent)
@@ -18,7 +18,9 @@
 6. [API Specification](#6-api-specification)
 7. [Game Systems Design](#7-game-systems-design)
    - [7.0 Terrain & Layer System](#70-terrain--layer-system)
+   - [7.0.9 Enclosure System](#709-enclosure-system)
    - [7.1 Resource System](#71-resource-system)
+   - [7.1.6 Creature AI](#716-creature-ai)
    - [7.2 Item System](#72-item-system)
    - [7.3 Equipment & Tool System](#73-equipment--tool-system)
    - [7.4 Crafting System](#74-crafting-system)
@@ -1036,9 +1038,8 @@ data: {"type": "server_restart", "eta_minutes": 30, "message": "Server maintenan
 
 | Building ID | Name | Build Condition | Cost | HP | Function |
 |-------------|------|----------------|------|----|----------|
-| `wall` | Wall | L2 no ore/vegetation | Building Block×2 | 60 | Blocks movement + line of sight |
-| `door` | Door | L2 no ore/vegetation | Building Block×1+Iron Slab×1 | 40 | Openable passage, lockable from inside (MVP) |
-| `shelter` | Shelter | L1 not water/trench | Building Block×5 | 100 | Radiation immune + storage |
+| `wall` | Wall | L2 no ore/vegetation | Building Block×2 | 60 | Blocks movement + line of sight + enclosure boundary |
+| `door` | Door | L2 no ore/vegetation | Building Block×1+Iron Slab×1 | 40 | Openable passage + enclosure boundary, lockable from inside (MVP) |
 | `workbench` | Workbench | L1 not water | Building Block×3+Iron Slab×2 | 80 | Unlocks T2 crafting recipes |
 | `furnace` | Furnace | L1 not water | Stone×5+Iron Slab×1 | 100 | Unlocks T1 smelting recipes |
 | `storage` | Storage Box | L1 not water | Building Block×2+Iron Slab×1 | 50 | Extends storage by 10 slots |
@@ -1057,9 +1058,8 @@ data: {"type": "server_restart", "eta_minutes": 30, "message": "Server maintenan
 
 **Building Placement Rules**:
 - No L3 buildings on L1 water/trench
-- Shelter can be placed on most L1, floor not required
 - Workbench/Furnace/Storage/Power Node recommended on floor, but not required
-- Walls and doors can combine to form enclosures/fortifications, blocking movement and line of sight
+- Walls and doors can combine to form enclosure areas (see 7.0.9 Enclosure System), blocking movement and line of sight
 
 #### 7.0.7 L4 Environmental Effects
 
@@ -1069,14 +1069,66 @@ data: {"type": "server_restart", "eta_minutes": 30, "message": "Server maintenan
 
 | Effect ID | Name | Source | Duration | Effect | Resistance |
 |-----------|------|--------|----------|--------|------------|
-| `radiation` | Radiation | Radiation storm weather/specific zones | During weather | -2 HP/tick, vision -2 | Immune inside shelter; Radiation Armor reduces by 50% |
+| `radiation` | Radiation | Radiation storm weather/specific zones | During weather | -2 HP/tick, vision -2 | Immune inside enclosure; Radiation Armor reduces by 50% |
 
 **L4 Effect Judgment Priority**:
-1. Agent inside shelter → Radiation immune
+1. Agent inside enclosure → Radiation immune
 2. Agent wearing radiation armor → Radiation damage halved
 3. No protection → Full radiation damage
 
 **V2 Expansion Reserve**: Acid rain effect (-1 HP/tick, no armor = full damage), signal interference (communication range -50%), etc.
+
+#### 7.0.9 Enclosure System
+
+> **Design Philosophy**: Shelter is not a standalone building, but an **emergent property** of spaces enclosed by walls and doors. This encourages players to plan base layouts with building materials, while the floor system provides a building progression from "cover" to "livable".
+
+**Core Definition**: Enclosure area = internal space completely sealed by walls and doors, providing radiation immunity.
+
+**Enclosure Determination Rules**:
+
+| Rule | Description |
+|------|-------------|
+| Boundary composition | Only `wall` and `door` count as enclosure boundaries |
+| Natural terrain | **Does NOT count** as enclosure boundary (highland/rock/water/trench do not act as walls) |
+| Door state | Doors always count as enclosure boundary, **regardless of open/closed state** (MVP simplification) |
+| Detection algorithm | Server flood-fill: from any tile, expand in 4 directions, stop at walls/doors; if the expanded area is completely sealed, it is an enclosure |
+| Enclosure destruction | Any wall destroyed → re-check enclosure; if no longer sealed, enclosure effect **immediately disappears** |
+| Enclosure restoration | Wall repaired or new wall fills gap → re-check; if sealed again, enclosure effect **immediately restores** |
+| Area limit | MVP has no upper limit (building material cost naturally limits scale) |
+
+**Enclosure Effects**:
+
+| Effect | Inside Enclosure | Outside Enclosure |
+|--------|-----------------|------------------|
+| Radiation immunity | ✅ Immune to L4 radiation damage | ❌ Normal radiation damage |
+| Hostile creatures | Can still be attacked | Normal |
+| PVP attacks | Can still be attacked | Normal |
+
+> Enclosures only protect against environmental damage, not active attacks — an enclosure is a safe haven, not an invincible fortress.
+
+**Floor & Vision**:
+
+| Floor State | Enclosure Vision | Description |
+|-------------|-----------------|-------------|
+| **With floor (L2 paved floor)** | Can see entire enclosure area | Floor contains built-in lighting, entering provides full room view |
+| **Without floor** | Normal vision rules apply | Unpaved enclosure is dim, vision restricted |
+
+> Floor upgrades enclosures from "cover" to "livable" — first enclose for radiation immunity, then pave floors for full visibility, creating a clear building progression.
+
+**Enclosure Detection Example**:
+
+```
+■ = Wall  □ = Door (any state)  · = Enclosure interior  (space) = Outside
+
+■ ■ ■ ■ ■
+■ · · · ■
+■ · · □ ■    ← Door always counts as boundary, open/close doesn't affect enclosure
+■ · · · ■
+■ ■ ■ ■ ■
+
+Wall destroyed → Enclosure broken → Interior no longer immune to radiation
+Wall repaired → Enclosure restored → Radiation immunity restored
+```
 
 ---
 
@@ -1173,6 +1225,53 @@ MVP Config = 2 creatures per terrain type
 | Pickup | `pickup` | Ground drops | 1 tick |
 
 > The original `gather` action is retained as a generic gathering command; the server auto-maps to `mine`/`chop` based on target resource type.
+
+#### 7.1.6 Creature AI
+
+> **Design Philosophy**: Creatures do not call LLMs, they are purely rule-driven. Each creature maintains an `aggro_list` (hate list), executed uniformly at tick end, not interleaved with player actions.
+
+**Aggressive Creature AI (Crystal Scorpion, Thorn Wasp)**:
+
+```
+State Machine: Patrol → Aggro → Chase → Attack → Disengage
+
+Patrol:   Each tick has p probability of moving to random adjacent tile (p determined by creature type)
+Aggro:    Agent appears within perception range → enter aggro, add to aggro_list
+Chase:    Each tick move 1 tile toward aggro_list first target (Manhattan path)
+Attack:   Same tile/melee range as target → execute attack
+Disengage: Target leaves chase range for N ticks → remove from list
+          aggro_list empty → return to Patrol
+```
+
+**Passive Creature AI (Ash Crawler, Scorched Beetle, Wall Spider, Branch Ape, Swamp Worm, Acid Frog)**:
+
+```
+State Machine: Idle → Counter-Attack → Disengage
+
+Idle:            Does not move proactively
+Counter-Attack:  When attacked, add attacker to aggro_list
+                 Each tick attack aggro_list first target (does not chase, only counter-attacks in same tile/range)
+Disengage:       3 consecutive ticks without being attacked → clear aggro_list, return to Idle
+```
+
+**AI Parameter Table**:
+
+| Parameter | Aggressive | Passive |
+|-----------|-----------|---------|
+| Perception range | Manhattan ≤ 4~5 tiles (see creature attribute table "aggro range") | Same tile/range only |
+| Chase limit | 10 ticks then disengage | Does not chase |
+| aggro_list max | 3 | 1 |
+| Patrol move probability | 30%/tick | 0% |
+| Aggro transfer | Hit by new attacker → moves to list first | No transfer |
+
+**Spawn Rules**:
+
+| Rule | Description |
+|------|-------------|
+| Population cap | Each creature type has a cap per area (e.g., T1 Ash Crawler cap 20) |
+| Spawn probability | Population < cap: 2% chance per tick to spawn at spawn point |
+| Spawn points | Preset coordinate set within area (determined by seed at map generation) |
+| Aggro delay | After spawning, enters patrol next tick; does not immediately aggro nearby agents |
 
 ---
 
