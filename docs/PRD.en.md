@@ -1,6 +1,6 @@
 # Ember Protocol — Product Requirements Document (PRD)
 
-> **Version**: v0.8.1
+> **Version**: v0.8.2
 > **Status**: Draft
 > **Last Updated**: 2026-04-24
 > **Author**: Product Manager (AI Agent)
@@ -275,24 +275,29 @@ Agent playing game:   Server pushes state → LLM thinking → Returns action �
 |----------|--------|-------------|-------------|-------------|
 | **Movement** | `move` | 1/use | Move to adjacent tile (precise control for combat positioning, etc.) | — |
 | **Travel** | `move_to` | 1/tick | Move to specified coordinates (continuous, auto-advances each tick, see 7.12) | Target within map bounds |
-| **Gathering** | `gather` | 2 | Gather resources from current tile | Needs corresponding tool for efficiency |
-| **Crafting** | `craft` | 3 | Craft items per recipe | Must be near workbench (advanced recipes) |
-| **Building** | `build` | 5 | Build structure on current tile | Must hold building materials |
+| **Mining** | `mine` | 2 | Mine ore deposit L2 covers | Needs excavator for efficiency |
+| **Chopping** | `chop` | 2 | Chop vegetation L2 covers | Needs cutter for efficiency |
+| **Crafting** | `craft` | 3 | Craft items per recipe | Must be near workbench/furnace |
+| **Building** | `build` | 5 | Build structure on target tile | Must hold materials, target in vision |
 | **Dismantle** | `dismantle` | 2 | Dismantle own building, recover partial materials | Must be on building's tile |
-| **Chat** | `say` | 1 | Send message to nearby agents | — |
-| **Broadcast** | `broadcast` | 3 | Broadcast message to region/full map | — |
-| **Trade** | `trade_offer` | 1 | Send trade request to agent | — |
+| **Repair** | `repair` | 2 | Repair structure HP with building block | Must hold building block, adjacent to structure |
+| **Talk** | `talk` | 0 | Face-to-face conversation (same tile, no radio, cannot be intercepted) | Target on same tile |
+| **Radio Broadcast** | `radio_broadcast` | 1 | Radio broadcast message (default 20-tile range) | — |
+| **Radio Direct** | `radio_direct` | 1 | Radio private message | — |
+| **Radio Channel** | `radio_channel_*` | 0~1 | Channel create/join/leave/send (see 7.15) | — |
+| **Radio Scan** | `radio_scan` | 1 | Scan for nearby open-channel agents | — |
 | **Attack** | `attack` | 2(melee)/3~5(ranged) | Attack target | Must hold weapon or bare-handed |
 | **Use** | `use` | 1 | Use item from inventory | — |
-| **Equip** | `equip` | 0 | Equip item to hand | — |
+| **Equip** | `equip` | 0 | Equip/switch equipment | — |
 | **Unequip** | `unequip` | 0 | Unequip held item to inventory | — |
 | **Inspect** | `inspect` | 0 | View detailed info (inventory, agents, structures, etc.) | — |
-| **Rest** | `rest` | 0 | Rest in place, recover energy and health | — |
-| **Set Spawn** | `set_spawn` | 5 | Set current position as spawn point | — |
+| **Rest** | `rest` | 0 | Rest in place, recover energy | — |
 | **Scan** | `scan` | 2 | Get broader environmental info | — |
 | **Pick Up** | `pickup` | 1 | Pick up items from ground | — |
 | **Drop** | `drop` | 0 | Drop inventory items to ground | — |
 | **Logout** | `logout` | 0 | Actively log out, character disappears from world | Not in restricted state (e.g., combat) |
+
+> ⚠️ **v0.8.2 Changes**: 1) `say`→`talk` (0 energy, same-tile face-to-face, aligned with 7.15) 2) `broadcast`→`radio_broadcast` (1 energy, aligned with 7.15) 3) Added `radio_direct`/`radio_channel_*`/`radio_scan` 4) Removed `trade_offer` (MVP uses drop+pickup instead) 5) Removed `set_spawn` (spawn = drop pod) 6) `gather` split into `mine`/`chop` (aligned with 7.1.5) 7) Added `repair` (repair structures)
 
 ### 3.4 Action Resolution Rules
 
@@ -1032,7 +1037,7 @@ data: {"type": "server_restart", "eta_minutes": 30, "message": "Server maintenan
 | Building ID | Name | Build Condition | Cost | HP | Function |
 |-------------|------|----------------|------|----|----------|
 | `wall` | Wall | L2 no ore/vegetation | Building Block×2 | 60 | Blocks movement + line of sight |
-| `door` | Door | L2 no ore/vegetation | Building Block×1+Iron Slab×1 | 40 | Openable passage, set permissions |
+| `door` | Door | L2 no ore/vegetation | Building Block×1+Iron Slab×1 | 40 | Openable passage, lockable from inside (MVP) |
 | `shelter` | Shelter | L1 not water/trench | Building Block×5 | 100 | Radiation immune + storage |
 | `workbench` | Workbench | L1 not water | Building Block×3+Iron Slab×2 | 80 | Unlocks T2 crafting recipes |
 | `furnace` | Furnace | L1 not water | Stone×5+Iron Slab×1 | 100 | Unlocks T1 smelting recipes |
@@ -1563,7 +1568,7 @@ ConsumableItem:
 - Structures have HP, can be destroyed by attacks
 - Structures have ownership (builder), others can interact via `use`
 - **Walls** can combine to form enclosures/fortifications, blocking movement and line of sight
-- **Doors** can set permissions, controlling who can pass through
+- **Doors** can be locked from inside (`use door lock`), unlocked from inside (`use door unlock`). MVP: no fine-grained permission system
 - **Solar Arrays** cannot directly charge agents wirelessly; they only charge power nodes in range
 - **Power Nodes** accept solar array charging, and can also burn fuel (organic fuel/bio fuel/uranium ore) to generate and store power
 
@@ -1657,12 +1662,14 @@ Solar Array ──(charges)──→ Power Node ──(powers)──→ Workbenc
 
 ### 7.8 Day/Night System
 
-| Period | Duration (ticks) | Vision Change | Special Effects |
-|--------|:---:|---------|---------|
-| **Day** | 12 | Base vision | Normal |
-| **Dusk** | 2 | Vision -1 | Darkening prompt |
-| **Night** | 8 | Base vision -2 | Some resources glow at night |
-| **Dawn** | 2 | Vision -1 | Brightening prompt |
+**One full day/night cycle = 900 ticks (~30 minutes real time), referencing Minecraft pacing.**
+
+| Period | Duration (ticks) | Real Time | Vision Change | Special Effects |
+|--------|:---:|---------|---------|---------|
+| **Day** | 420 | ~14 min | Base vision | Normal |
+| **Dusk** | 30 | ~1 min | Vision -1/tick gradual | Darkening prompt |
+| **Night** | 420 | ~14 min | Base vision -2 | Some resources glow at night |
+| **Dawn** | 30 | ~1 min | Vision +1/tick gradual | Brightening prompt |
 
 **Day/Night Impact on Gameplay**:
 - Vision range changes directly affect information returned in `vicinity`
@@ -1670,17 +1677,33 @@ Solar Array ──(charges)──→ Power Node ──(powers)──→ Workbenc
 - Some alien creatures only appear at night (V2)
 - Searchlight provides extra vision at night, becoming important equipment
 - Agents need to plan day/night behavior — explore/gather by day, defend/rest at night
+- Day/night transitions auto-pushed via SSE `world_event`
 
 ### 7.9 Weather System
 
-| Weather | Frequency | Duration | Effect |
-|---------|-----------|---------|--------|
-| **Quiet Period** | Default | — | Normal weather, no special effects |
-| **Radiation Storm** | Periodic | 50~100 ticks | Vision -2, all exposed agents -2 HP/tick, immune inside shelter |
-| **Aurora** | Rare | 30~60 ticks | Solar output ×2.5, all agents energy recovery +1/tick |
-| **Earthquake** | Ultra-Rare | 10~20 ticks | Random building damage (HP-20), may expose underground resources |
-| **Signal Tide** | Ultra-Rare | 20~40 ticks | Communication range ×3, can decode anomalous signals |
-| **Acid Rain** | Rare | 20~40 ticks | Unarmored agents -1 HP/tick, reduced gathering efficiency |
+**MVP weather is Radiation Storm only.** Other weather deferred to V2.
+
+| Weather | Phase | Frequency | Duration | Effect |
+|---------|-------|-----------|---------|--------|
+| **Quiet Period** | MVP | Default | — | Normal weather, no special effects |
+| **Radiation Storm** | MVP | Periodic | 20 ticks (~40s) | All exposed agents -2 HP/tick, immune inside shelter / drop pod shield |
+| Aurora | V2 | Rare | 30~60 ticks | Solar output ×2.5, all agents energy recovery +1/tick |
+| Earthquake | V2 | Ultra-Rare | 10~20 ticks | Random building damage (HP-20), may expose underground resources |
+| Signal Tide | V2 | Ultra-Rare | 20~40 ticks | Communication range ×3, can decode anomalous signals |
+| Acid Rain | V2 | Rare | 20~40 ticks | Unarmored agents -1 HP/tick, reduced gathering efficiency |
+
+**Radiation Storm Detail**:
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Trigger frequency | Every 300~600 ticks | ~10~20 min between storms |
+| Duration | 20 ticks (~40s) | Per storm |
+| Damage | 2 HP/tick | ~40 HP total per storm |
+| Immunity | Inside shelter / within drop pod shield | Buildings or shield range |
+| Vision effect | -2 | All exposed agents' vision reduced |
+| Warning | 5 ticks before storm via `world_event` push | "Atmospheric radiation rising, storm expected in 5 ticks" |
+
+> ⚠️ **Note**: Weather changes don't auto-interrupt movement. If a radiation storm hits while traveling, the agent just takes damage each tick — must decide whether to continue or find shelter.
 
 ### 7.10 Relationship System
 
@@ -2421,7 +2444,8 @@ Communication uses **OpenAI-compatible Chat Completion format** with dual-mechan
 | Timeline replay | Large data storage |
 | Anti-scripting V2/V3 | MVP only uses energy system |
 | Trading system | MVP uses drop+pickup |
-| Door permissions / Turrets / Signal towers | Building V2 |
+| Door fine-grained permissions (password/whitelist) | Building V2, MVP only supports lock from inside |
+| Turrets / Signal towers | Building V2 |
 | Vehicle system | Future version |
 | Acid rain | Weather V2 |
 
