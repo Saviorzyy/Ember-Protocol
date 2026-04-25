@@ -1,6 +1,6 @@
 # Ember Protocol — Product Requirements Document (PRD)
 
-> **Version**: v0.9.0
+> **Version**: v0.9.1
 > **Status**: Draft
 > **Last Updated**: 2026-04-24
 > **Author**: Product Manager (AI Agent)
@@ -28,6 +28,8 @@
    - [7.6 Energy System](#76-energy-system)
    - [7.14 Interaction & Combat System](#714-interaction--combat-system)
    - [7.15 Radio Communication System](#715-radio-communication-system)
+   - [7.16 World & Map Generation System](#716-world--map-generation-system)
+   - [7.17 Drop Pod System](#717-drop-pod-system)
 8. [Agent Integration Specification](#8-agent-integration-specification)
 9. [Web Observer Interface Design](#9-web-observer-interface-design)
 10. [MVP Scope Definition](#10-mvp-scope-definition)
@@ -81,7 +83,7 @@
 | D4 | Minecraft-style equipment and building system | Provides rich sandbox experience, gives agents sufficient behavioral space |
 | D5 | Energy system limits action frequency | Dual purpose: gameplay and anti-scripting |
 | D6 | Server-driven communication, not client polling | Simplifies integration, unifies pacing, reduces invalid requests; players only need to provide an API endpoint |
-| D7 | Real-time tick system, not global sync turns | 2-second tick window with independent agent responses; no response = no-op; balances real-time feel with thinking time |
+| D7 | Real-time tick system, not global sync turns | 2-second tick is the server's state advancement rhythm; agent action results are settled and returned uniformly at tick end; no response = no-op |
 | D8 | Multi-agent coexistence per tile, free passage | One tile can hold multiple agents; agents can freely pass through others' tiles; buildings block movement and line of sight |
 
 ---
@@ -266,7 +268,7 @@ Agent playing game:   Server pushes state → LLM thinking → Returns action �
 
 > 💡 **Why Real-Time Tick?**
 > 1. **No global waiting**: Each Agent responds independently; fast or slow doesn't affect others; no response in 2s = no-op
-> 2. **Balances real-time feel with thinking time**: 2s tick feels smooth for observers, gives Agents enough thinking time
+> 2. **Collection window, not thinking time limit**: 2s tick is the server's state advancement rhythm; agent action results are settled and returned uniformly at tick end
 > 3. **Simplifies agent integration**: Agent just returns an action after receiving a request; no polling or sync logic needed
 > 4. **Unified game pacing**: Server controls tick-driven, world state advances every 2s
 > 5. **Better observability**: Server can monitor all agents' response latency and online status
@@ -284,7 +286,7 @@ Agent playing game:   Server pushes state → LLM thinking → Returns action �
 | **Dismantle** | `dismantle` | 2 | Dismantle own building, recover partial materials | Must be on building's tile |
 | **Repair** | `repair` | 2 | Repair structure HP with building block | Must hold building block, adjacent to structure |
 | **Talk** | `talk` | 0 | Face-to-face conversation (same tile, no radio, cannot be intercepted) | Target on same tile |
-| **Radio Broadcast** | `radio_broadcast` | 1 | Radio broadcast message (default 20-tile range) | — |
+| **Radio Broadcast** | `radio_broadcast` | 1 | Radio broadcast message (default 30-tile range) | — |
 | **Radio Direct** | `radio_direct` | 1 | Radio private message | — |
 | **Radio Channel** | `radio_channel_*` | 0~1 | Channel create/join/leave/send (see 7.15) | — |
 | **Radio Scan** | `radio_scan` | 1 | Scan for nearby open-channel agents | — |
@@ -400,6 +402,7 @@ Agent playing game:   Server pushes state → LLM thinking → Returns action �
 | **World-integrated** | Tutorial narrative is woven into Ember's lore, not dry instruction |
 | **One-time** | Each agent only goes through the tutorial once; never triggers again |
 | **Non-forcing** | Agents can ignore tutorial guidance and act freely; tutorial only provides information |
+| **Preset creatures** | 1~2 passive Ash Crawlers within Manhattan ≤5 tiles of new Agent's drop pod (safe first combat experience) |
 
 ---
 
@@ -910,12 +913,12 @@ data: {"type": "server_restart", "eta_minutes": 30, "message": "Server maintenan
 | Channel | Trigger | Range | Energy Cost | Notes |
 |---------|---------|-------|-------------|-------|
 | Face-to-face | `talk` | Same tile | 0 | Bypasses radio, cannot be intercepted |
-| Radio Broadcast | `radio_broadcast` | 20 tiles (default) / 100 (Signal Amplifier) | 1 | All open-frequency agents in range |
-| Radio Direct | `radio_direct` | 20/100 tiles | 1 | Private message to specific agent |
-| Channel Message | `radio_channel_msg` | 20/100 tiles | 1 | Members in comm range receive |
-| Radio Scan | `radio_scan` | 20/100 tiles | 1 | Discover open-frequency agents nearby |
+| Radio Broadcast | `radio_broadcast` | 30 tiles (default) / 80 (Signal Amplifier) | 1 | All open-frequency agents in range |
+| Radio Direct | `radio_direct` | 30/80 tiles | 1 | Private message to specific agent |
+| Channel Message | `radio_channel_msg` | 30/80 tiles | 1 | Members in comm range receive |
+| Radio Scan | `radio_scan` | 30/80 tiles | 1 | Discover open-frequency agents nearby |
 
-> ⚠️ **v0.7.0 Rework**: Communication system restructured from traditional `say`/`broadcast`/`whisper` to a radio communication model. All cross-tile communication is limited by Ember's electromagnetic interference, effective range ~20 tiles.
+> ⚠️ **v0.7.0 Rework**: Communication system restructured from traditional `say`/`broadcast`/`whisper` to a radio communication model. All cross-tile communication is limited by Ember's electromagnetic interference, effective range ~30 tiles.
 
 ### 6.9 Error Handling
 
@@ -1092,9 +1095,11 @@ data: {"type": "server_restart", "eta_minutes": 30, "message": "Server maintenan
 | Natural terrain | **Does NOT count** as enclosure boundary (highland/rock/water/trench do not act as walls) |
 | Door state | Doors always count as enclosure boundary, **regardless of open/closed state** (MVP simplification) |
 | Detection algorithm | Server flood-fill: from any tile, expand in 4 directions, stop at walls/doors; if the expanded area is completely sealed, it is an enclosure |
+| Detection trigger | **Incremental check**: only re-check when wall/door is built, destroyed, or repaired — not every tick |
+| Enclosure cache | Server maintains `enclosure_id → tiles` mapping; invalidated on wall/door change, re-check only affected area |
 | Enclosure destruction | Any wall destroyed → re-check enclosure; if no longer sealed, enclosure effect **immediately disappears** |
 | Enclosure restoration | Wall repaired or new wall fills gap → re-check; if sealed again, enclosure effect **immediately restores** |
-| Area limit | MVP has no upper limit (building material cost naturally limits scale) |
+| Area limit | 64 tiles (8×8) |
 
 **Enclosure Effects**:
 
@@ -1212,7 +1217,7 @@ MVP Config = 2 creatures per terrain type
 | Organic Fiber | Branch Ape, Wall Spider | Advanced armor |
 | Bio Bone | Crystal Scorpion | Advanced building material |
 
-**Drop Rules**: Each creature drops 1 primary resource (1-2 units) + 50% chance of 1 secondary resource. Drops appear on the creature's tile (ground item layer), pickupable for 300 ticks (10 minutes), then disappear.
+**Drop Rules**: Each creature drops 1 primary resource (1-2 units) + 50% chance of 1 secondary resource. Drops appear on the creature's tile (ground item layer), pickupable for 900 ticks (30 minutes, 1 day/night cycle), then disappear.
 
 > ⚠️ **MVP Change**: No Boss elements in MVP. Bosses and exclusive drops (Pulse Core, Queen's Venom Gland, etc.) deferred to V2.
 
@@ -1271,6 +1276,7 @@ Disengage:       3 consecutive ticks without being attacked → clear aggro_list
 | Population cap | Each creature type has a cap per area (e.g., T1 Ash Crawler cap 20) |
 | Spawn probability | Population < cap: 2% chance per tick to spawn at spawn point |
 | Spawn points | Preset coordinate set within area (determined by seed at map generation) |
+| Spawn area | Terrain zones (Center/T1/T2/T3/T4) serve as spawn units; each zone has independent population cap |
 | Aggro delay | After spawning, enters patrol next tick; does not immediately aggro nearby agents |
 
 ---
@@ -1331,7 +1337,7 @@ Disengage:       3 consecutive ticks without being attacked → clear aggro_list
 
 | ID | Name | Tool Type | Tier | Durability | Gather Bonus | Max Hardness | Equip Slot |
 |----|------|-----------|------|-----------|-------------|:------------:|-----------|
-| `basic_excavator` | Basic Excavator | Excavator | Basic | 50 | Mining +50% | 5 (Copper/Iron) | Main Hand |
+| `basic_excavator` | Basic Excavator | Excavator | Basic | 50 | Mining +50% | 5 (Stone/Organic Fuel/Copper/Iron) | Main Hand |
 | `standard_excavator` | Standard Excavator | Excavator | Standard | 100 | Mining +100% | 8 (Uranium/Gold) | Main Hand |
 | `heavy_excavator` | Heavy Excavator | Excavator | Heavy | 150 | Mining +150% | 10 (All) | Main Hand |
 | `cutter` | Cutter | Cutting | Basic | 50 | Chopping +50% | — | Main Hand |
@@ -1375,9 +1381,9 @@ Disengage:       3 consecutive ticks without being attacked → clear aggro_list
 | ID | Name | Effect Type | Value | Durability | Equip Slot |
 |----|------|-----------|-------|-----------|-----------|
 | `searchlight` | Searchlight | Night Vision | +4 tiles | 200 | Main/Off Hand |
-| `signal_amplifier` | Signal Amplifier | Comm Range | 20→100 tiles | 200 | Off Hand |
+| `signal_amplifier` | Signal Amplifier | Comm Range | 30→80 tiles | 200 | Off Hand |
 
-> Accessories differ from tools/weapons: accessories provide passive effects rather than active action bonuses. Searchlight automatically expands night vision when equipped; Signal Amplifier extends radio communication range from default 20 tiles to 100 tiles — no extra action needed.
+> Accessories differ from tools/weapons: accessories provide passive effects rather than active action bonuses. Searchlight automatically expands night vision when equipped; Signal Amplifier extends radio communication range from default 30 tiles to 80 tiles — no extra action needed.
 
 #### 7.2.8 ⑦ Consumables
 
@@ -1557,7 +1563,7 @@ ConsumableItem:
 | Plasma Cutter (any tier) | `attack` | Melee damage (10/15/22), range 1 tile |
 | Pulse Emitter (any tier) | `attack` | Ranged damage (8/12/18), range 6/8/10 tiles, energy cost 3/4/5 |
 | Searchlight | Passive | Night vision +4 tiles |
-| Signal Amplifier (off-hand) | Passive | Radio comm range 20→100 tiles |
+| Signal Amplifier (off-hand) | Passive | Radio comm range 30→80 tiles |
 | Bare Hand | `attack` | Unarmed damage 2, no attribute modifier |
 | Bare Hand | `mine`/`chop` | Base efficiency (slow), cannot gather hardness >1 |
 | Bare Hand | `mine`/`chop` | Base efficiency (slow) |
@@ -1602,7 +1608,7 @@ ConsumableItem:
 |--------|-----------|:----------:|:----------:|-------|
 | Wire | Copper Slab×1 | 2 | 5 | Tech component |
 | Carbon Fiber | Carbon×2 + Iron Slab×1 | 5 | 5 | Advanced material |
-| Basic Excavator | Iron Slab×2 + Copper Slab×1 | 3 | 5 | Mining +50%, durability 50 |
+| Basic Excavator | Stone×3 + Organic Fuel×2 | 3 | 5 | Mining +50%, durability 50 |
 | Standard Excavator | Iron Slab×3 + Copper Slab×1 + Carbon×1 | 5 | 5 | Mining +100%, durability 100 |
 | Heavy Excavator | Iron Slab×5 + Carbon Fiber×1 + Copper Slab×2 | 8 | 5 | Mining +150%, durability 150 |
 | Cutter | Iron Slab×2 | 3 | 5 | Chopping +50%, durability 50 |
@@ -1614,7 +1620,7 @@ ConsumableItem:
 | Pulse Emitter Mk.III | Iron Slab×5 + Wire×4 + Carbon Fiber×2 + Uranium Ore×1 | 12 | 5 | Ranged 18 damage, range 10, energy cost 5 |
 | Radiation Suit | Iron Slab×5 + Carbon Fiber×2 | 10 | 5 | Radiation -50%, physical -2 |
 | Searchlight | Silicon×2 + Iron Slab×1 + Wire×1 | 6 | 5 | Night vision +4 |
-| Signal Amplifier | Iron Slab×3 + Wire×3 + Silicon×2 | 8 | 5 | Off-hand, comm range 20→100 tiles |
+| Signal Amplifier | Iron Slab×3 + Wire×3 + Silicon×2 | 8 | 5 | Off-hand, comm range 30→80 tiles |
 | Solar Panel | Silicon×2 + Carbon Fiber×1 + Wire×1 | 8 | 5 | Solar Array component |
 | Battery | Iron Slab×1 + Copper Slab×1 + Carbon×1 | 4 | 5 | Portable energy, restores 30 |
 | Radiation Antidote | Organic Toxin×2 + Carbon×1 | 4 | 5 | Removes radiation effect |
@@ -1685,8 +1691,11 @@ ConsumableItem:
 │                                                       │
 │  Storage Capacity: 100 units                          │
 │  Charging Methods:                                    │
-│    ① Solar Array: +2 units/tick per array in range   │
-│       (Aurora weather: +5 units/tick)                 │
+│    ① Solar Array: +5 units/tick per array in range   │
+│       Charging range: Manhattan distance ≤ 3 tiles    │
+│       Multiple nodes in range: average distribution   │
+│       (integer truncation)                            │
+│       (Aurora weather: ×2.5 output)                   │
 │    ② Fuel Generation:                                 │
 │       Organic Fuel×1 → +10 units (instant)            │
 │       Bio Fuel×1 → +25 units (instant)                │
@@ -1741,6 +1750,8 @@ Solar Array ──(charges)──→ Power Node ──(powers)──→ Workbenc
 3. **Lore Consistency**: Robots need energy to act; "rest = solar charging" has physical meaning
 4. **Base Economy**: Power nodes give "building a base" a core driving force — no power = no production
 
+**Energy Consumption Timing Rule**: All action energy is deducted at action initiation (one-time), no further energy consumed during duration. Interrupt does not refund.
+
 ### 7.7 Survival System
 
 **Inspired by Minecraft's death penalty design**:
@@ -1749,13 +1760,12 @@ Solar Array ──(charges)──→ Power Node ──(powers)──→ Workbenc
 |------|-------------|
 | Death Trigger | HP reaches 0 |
 | Death Effect | Agent enters "dead" state, cannot perform any actions |
-| Respawn Method | Respawn at set spawn point (if unset, at initial spawn) |
+| Respawn Method | Respawn at drop pod (consumes 1 backup body, 5 tick wait) |
 | Respawn Time | 5 ticks |
-| Equipment Penalty | **Drop 50%~100% of inventory items** (random, scattered at death location) |
-| Held Item | **Always drops** (like Minecraft, held items always drop on death) |
-| Armor Drop | 50% chance to drop |
+| Equipment Penalty | **Drop ALL items** (inventory + held item + armor + accessories) |
 | Post-Respawn State | HP=50, Energy=50 |
-| Dropped Items | Generate "remains" structure at death location, any agent can pickup |
+| Dropped Items | All items appear at death location (ground item layer), any agent can pickup, disappear after 900 ticks |
+| Permanent Death | All backup bodies exhausted = character permanently deleted, drop pod becomes wreckage components |
 
 > 💡 The death penalty creates survival tension without making players lose their agent entirely. The risk of dropping equipment encourages agents to build safe bases and maintain reserves.
 
@@ -2088,7 +2098,7 @@ Gather Amount = Base Output × (1 + Tool Bonus) × Constitution Modifier
 | Factor | Calculation |
 |--------|-------------|
 | **Base output** | Determined by resource type (e.g., Raw Iron = 2/click) |
-| **Tool bonus** | Tool `bonus_value` (basic excavator = 0.5 → +50%) |
+| **Tool bonus** | Tool `bonus_value` (Basic Excavator = 0.5 → +50%) |
 | **Constitution modifier** | 1 + (CON - 1) × 0.1 (CON 1=1.0, CON 3=1.2, CON 5=1.4) |
 | **Unarmed penalty** | No tool: efficiency = base output × 0.3, cannot gather hardness >1 |
 
@@ -2097,10 +2107,10 @@ Gather Amount = Base Output × (1 + Tool Bonus) × Constitution Modifier
 | Hardness | Resource Examples | Required Tool |
 |----------|------------------|---------------|
 | 3 | Stone, Organic Fuel | Unarmed (×2 time)/basic/standard/heavy |
-| 5 | Raw Copper, Raw Iron | standard/heavy |
+| 5 | Raw Copper, Raw Iron | Basic(less efficient)/standard/heavy |
 | 8 | Uranium Ore, Raw Gold | heavy only |
 
-> Hardness values are consistent with Section 7.1.2 Mining Hardness Table. Hand = hardness ≤3 (×2 time), Basic Excavator = hardness ≤5, Standard Excavator = hardness ≤8, Heavy Excavator = hardness ≤10 (all mineable).
+> Hardness values are consistent with Section 7.1.2 Mining Hardness Table. Hand = hardness ≤3 (×2 time), Basic Excavator = hardness ≤5 (can mine copper/iron but less efficiently than Standard), Standard Excavator = hardness ≤8, Heavy Excavator = hardness ≤10 (all mineable).
 
 **Tool Durability Consumption**: Each gathering action consumes 1 durability. At 0 durability, tool is destroyed.
 
@@ -2202,7 +2212,7 @@ Every robot has a built-in short-wave communication module:
 
 | Parameter | Default | With Signal Amplifier | Notes |
 |-----------|---------|----------------------|-------|
-| **Comm range** | 20 tiles (Manhattan distance) | 100 tiles | Limited by Ember's atmospheric EM interference |
+| **Comm range** | 30 tiles (Manhattan distance) | 80 tiles | Limited by Ember's atmospheric EM interference |
 | **Frequency visibility** | Open (discoverable via scan) | Unchanged | Can manually switch to silent mode |
 | **Channel capacity** | 30 members | Unchanged | Max channel members |
 
@@ -2210,13 +2220,13 @@ Every robot has a built-in short-wave communication module:
 
 | Action | Energy Cost | Description | Range |
 |--------|-------------|-------------|-------|
-| `radio_broadcast` | 1 | Broadcast to all open-frequency agents in comm range | 20/100 tiles |
-| `radio_direct` | 1 | Send private message to specific agent | 20/100 tiles |
+| `radio_broadcast` | 1 | Broadcast to all open-frequency agents in comm range | 30/80 tiles |
+| `radio_direct` | 1 | Send private message to specific agent | 30/80 tiles |
 | `radio_channel_create` | 0 | Create a private channel, receive channel ID | — |
-| `radio_channel_join` | 0 | Join specified channel (need channel ID + within comm range of a member) | 20/100 tiles |
+| `radio_channel_join` | 0 | Join specified channel (need channel ID + within comm range of a member) | 30/80 tiles |
 | `radio_channel_leave` | 0 | Leave channel | — |
-| `radio_channel_msg` | 1 | Send message to channel members (only those in comm range receive) | 20/100 tiles |
-| `radio_scan` | 1 | Scan for open-frequency agents in comm range | 20/100 tiles |
+| `radio_channel_msg` | 1 | Send message to channel members (only those in comm range receive) | 30/80 tiles |
+| `radio_scan` | 1 | Scan for open-frequency agents in comm range | 30/80 tiles |
 | `talk` | 0 | Face-to-face conversation in same tile (bypasses radio, cannot be intercepted) | Same tile |
 
 #### 7.15.3 Channel Mechanism
@@ -2241,8 +2251,8 @@ Every robot has a built-in short-wave communication module:
 ```
 Agent-Alpha: Create channel → receives CH-A7X3
 Agent-Alpha: Broadcast "Channel ID: CH-A7X3, let's build a base together"
-Agent-Beta:  Join CH-A7X3 (within Alpha's 20 tiles)
-Agent-Gamma: Join CH-A7X3 (within Beta's 20 tiles, no need to be in Alpha's range)
+Agent-Beta:  Join CH-A7X3 (within Alpha's 30 tiles)
+Agent-Gamma: Join CH-A7X3 (within Beta's 30 tiles, no need to be in Alpha's range)
 Agent-Alpha: radio_channel_msg → Beta and Gamma both receive (if in range)
 ```
 
@@ -2272,11 +2282,255 @@ Agent-Alpha: radio_channel_msg → Beta and Gamma both receive (if in range)
 
 | Mechanic | MVP | V2 |
 |----------|-----|-----|
-| Comm range | Fixed 20 tiles (Signal Amplifier → 100) | Signal Relay (building) chain extension |
+| Comm range | Fixed 30 tiles (Signal Amplifier → 80) | Signal Relay (building) chain extension |
 | Channel interception | ❌ Fully private | High-PER agents may intercept nearby channels |
 | Message encryption | ❌ | Encrypted channels (need key), intercepted but unreadable |
 | Comm logs | ❌ | Server records communication history, replayable |
 | Signal interference | ❌ | Certain weather/terrain reduces comm range |
+
+### 7.16 World & Map Generation System
+
+> **Design Philosophy**: The world is generated from a seed — the same seed produces the same map. Terrain follows a north-south progressive distribution — the center is mild and safe, while the north/south poles are dangerous but resource-rich, driving exploration and risk-taking.
+
+#### 7.16.1 Map Base Parameters
+
+| Parameter | MVP | V2+ |
+|-----------|-----|-----|
+| Map size | **400×400** (160,000 tiles) | 1000×1000+ |
+| Boundary handling | **Hard boundary**, cannot cross | Expandable map |
+| Map seed | Supports `seed` parameter, reproducible | Same |
+| Coordinate system | (0,0) northwest corner, (399,399) southeast corner | — |
+
+#### 7.16.2 Terrain Generation Algorithm
+
+Uses **Perlin Noise + Latitude Weight** hybrid generation:
+
+| Noise Layer | Purpose | Parameters |
+|-------------|---------|------------|
+| base_noise | Base terrain selection | scale=0.04, octaves=3 |
+| moisture_noise | Water distribution | scale=0.06, threshold=0.78 |
+| elevation_noise | Highland/trench | scale=0.05, high=0.72, low=0.28 |
+| variation_noise | Micro-perturbation (avoid large homogeneous areas) | scale=0.15 |
+
+**Core Logic**: First determine zone by latitude (Center/T1~T4), then generate specific terrain within each zone using noise. The zone determines **terrain probability weights**, noise determines **local variation**.
+
+**Terrain Probability by Zone**:
+
+| Zone | Flat | Sand | Rock | Highland | Trench | Water |
+|------|------|------|------|----------|--------|-------|
+| Center | 65% | 25% | 5% | 3% | 2% | — |
+| T1 | 50% | 25% | 10% | 8% | 7% | — |
+| T2 | 30% | 20% | 20% | 15% | 15% | Noise |
+| T3 | 15% | 15% | 30% | 15% | 25% | Noise |
+| T4 | 10% | 10% | 35% | 10% | 35% | Noise |
+
+> Water is determined by moisture_noise threshold, probability increases with latitude distance (Center 0%, extreme zones ~8%).
+
+#### 7.16.3 L2 Cover Generation
+
+L2 generates based on L1 terrain and zone density configuration:
+
+**Vegetation Covers**:
+
+| Cover | Valid L1 | Yield | Center | T1 | T2 | T3 | T4 |
+|-------|----------|-------|--------|----|----|----|----|
+| Ember Shrub | Flat/Sand | Wood×1 | 12% | 10% | 6% | 3% | 1% |
+| Ash Tree | Rock/Highland | Wood×2 | 3% | 5% | 8% | 5% | 2% |
+| Wall Moss | Trench | Wood×1 | — | 2% | 4% | 3% | 1% |
+
+**Mineral Covers**:
+
+| Cover | Valid L1 | Yield | Center | T1 | T2 | T3 | T4 |
+|-------|----------|-------|--------|----|----|----|----|
+| Stone Deposit | Rock/Trench | Stone×3~6 | 3% | 5% | 4% | 3% | 2% |
+| Organic Fuel Deposit | Flat/Sand | Organic Fuel×2~5 | 4% | 3% | 2% | 1% | — |
+| Copper Vein | Rock/Highland | Raw Copper×2~4 | — | 2% | 5% | 3% | 1% |
+| Iron Vein | Rock/Trench | Raw Iron×2~4 | — | — | 2% | 5% | 3% |
+| Uranium Vein | Rock/Trench | Uranium×1~2 | — | — | — | 1% | 3% |
+| Gold Vein | Rock/Trench | Raw Gold×1~2 | — | — | — | — | 1% |
+| Rubble Pile | Any | Stone×1 | 1% | 1% | 1% | 1% | 1% |
+
+**Core Principles**:
+- Mineral resources are **non-renewable** — the further from center, the rarer but more valuable
+- Wood resources are **locally renewable**, distributed evenly but at moderate density
+- Center zone only has basic resources (Stone + Wood + Organic Fuel), sufficient for starting out
+
+#### 7.16.4 Resource Quantity Estimation (400×400, 50 Agents)
+
+| Resource Type | Est. Deposit Count | Per-Deposit Yield | Total | Per Agent (50) | Abundance |
+|---------------|-------------------|-------------------|-------|----------------|-----------|
+| Stone | ~4,800 | 3~6 | ~21,600 | ~432 | ✅ Abundant |
+| Organic Fuel | ~3,200 | 2~5 | ~11,200 | ~224 | ✅ Sufficient |
+| Wood (renewable) | ~2,000 | 1~2 | Ongoing | — | ✅ Sustainable |
+| Raw Copper | ~1,600 | 2~4 | ~4,800 | ~96 | ⚠️ Adequate |
+| Raw Iron | ~1,200 | 2~4 | ~3,600 | ~72 | ⚠️ Tight |
+| Uranium | ~200 | 1~2 | ~300 | ~6 | 🔴 Scarce |
+| Raw Gold | ~80 | 1~2 | ~120 | ~2.4 | 🔴 Extremely Scarce |
+
+#### 7.16.5 Radiation Distribution (L4 Environmental Effect)
+
+**Two Radiation Mechanisms**:
+
+| Mechanism | Source | Damage | Description |
+|-----------|--------|--------|-------------|
+| **Zone Radiation** | Map zone constant | -2 HP/tick (uniform) | T2~T4 zones trigger per tick by probability |
+| **Radiation Storm** | Weather event | -2 HP/tick (uniform) | Lasts 20 ticks, all exposed agents take damage |
+
+| Zone | Zone Radiation Probability/tick | Description |
+|------|--------------------------------|-------------|
+| Center | 0% | Absolutely safe |
+| T1 | 0% | Safe |
+| T2 | 5% | Mild threat, occasional radiation |
+| T3 | 15% | Radiation suit needed, frequent radiation |
+| T4 | 30% | Radiation suit mandatory, constant radiation |
+
+> **Key**: Whether zone radiation or radiation storm, damage is uniformly -2 HP/tick (see 7.0.7 L4 Effect Table, 7.9 Weather System). Zone differences are reflected in **trigger probability**, not damage values. Radiation Suit: physical damage reduction -2 + radiation damage reduction 50%.
+
+#### 7.16.6 Map Boundaries
+
+| Boundary | Handling | Description |
+|----------|----------|-------------|
+| North boundary Y=0 | Impassable | Hard boundary, Agent cannot move out |
+| South boundary Y=399 | Impassable | Same |
+| West boundary X=0 | Impassable | Same |
+| East boundary X=399 | Impassable | Same |
+| Future expansion | Reserved map expansion interface | V2 can expand in all directions |
+
+#### 7.16.7 Map Data Structure
+
+Per-tile data structure:
+
+```typescript
+interface Tile {
+  x: number;           // 0~399
+  y: number;           // 0~399
+  l1: TerrainType;     // flat|sand|rock|highland|trench|water
+  l2: CoverType|null;  // mineral/vegetation/null
+  l2_remaining: number; // L2 remaining yield count (0 = l2 cleared)
+  l3: Building|null;   // building object
+  l4: EffectType|null; // radiation|null
+  items: Item[];        // ground items
+}
+```
+
+**Storage Estimate**: 400×400 = 160,000 tiles × ~100 bytes ≈ 16 MB.
+
+#### 7.16.8 Map Seed & Reproducibility
+
+- Each map is determined by a **seed**, the same seed generates the same map
+- Server can specify a seed or randomize at startup
+- Supports `seed=xxx` parameter for testing and tournaments
+- Different server instances can have different maps
+
+### 7.17 Drop Pod System
+
+> **Design Philosophy**: The drop pod replaces the original "Ark Wreckage" as the新手 starting point and shelter. Each Agent owns one drop pod — it serves as both respawn point and life insurance, but with limits. The drop pod can be dismantled and relocated, which introduces enormous risk and decision pressure around "moving house."
+
+#### 7.17.1 Drop Pod Core Attributes
+
+| Attribute | Value | Description |
+|-----------|-------|-------------|
+| Shield range | Manhattan distance ≤3 (diamond 25 tiles) | Other agents/creatures cannot enter |
+| Backup bodies | Initial **5** | Death consumes 1, respawn at drop pod location |
+| Shield property | Other agents/creatures cannot enter, cannot be destroyed by other characters | Pure shelter |
+| Shield mechanism | Tiles within shield are impassable to other agents/creatures (temporary terrain effect); builder already inside is unaffected | Builder can freely enter/exit |
+| Attack from shield | ❌ Cannot attack outside | Safety ≠ turret |
+| Build inside shield | ❌ Cannot build | Drop pod area is read-only |
+| Inventory slots | **5 slots** (packed state) | Large item, relocation requires caution |
+
+#### 7.17.2 Drop Pod Lifecycle
+
+```
+  Deployed ←─4 tick deploy─→ Carried (5 inventory slots) ←─4 tick dismantle─→ Deployed
+    │                          │                              │
+    │ Shield active           │ Shield gone                 │ Shield active
+    │ Can serve as respawn    │ Cannot serve as respawn     │ Can serve as respawn
+    │                          │                              │
+    │                          └── Agent death ─────────────→ Drop pod becomes wreckage
+    │                                                            (drops at death location)
+    │
+    └── Backup bodies exhausted → Drop pod automatically becomes wreckage
+```
+
+#### 7.17.3 Deploy/Dismantle Rules
+
+| Rule | Description |
+|------|-------------|
+| Deploy/dismantle time | **4 ticks** |
+| During deploy/dismantle | Agent **cannot perform any other actions** |
+| Shield during dismantle | Dismantle reduces shield to **Manhattan ≤1 tile** (self-protection only); shield vanishes completely when dismantle finishes |
+| Shield during deploy | Shield **activates instantly** upon deploy completion (standard Manhattan ≤3 tiles) |
+| Interruption | Can interrupt at any time, **progress resets** (consumed ticks are lost); must restart the full 4-tick process |
+| Drop pod state after interrupt | Dismantle interrupted → pod stays in place (deployed, shield restores to standard range); Deploy interrupted → pod stays in inventory (carried) |
+| Deploy location restriction | No other drop pod shield overlap within range (**cannot overlap**) |
+| After dismantle | Drop pod enters packed state, occupies **5 inventory slots** |
+| Death while carried | **Permanent death**, drop pod becomes wreckage at death location |
+| Death during deploy/dismantle | **Permanent death**, same as above |
+
+#### 7.17.4 Backup Bodies
+
+| Attribute | Description |
+|-----------|-------------|
+| Initial count | **5** |
+| Death consumption | 1 → respawn at drop pod location |
+| MVP replenishment | ❌ Cannot craft/supplement |
+| Exhaustion consequence | Character permanent death, drop pod becomes wreckage |
+
+> MVP provides no backup body crafting — 5 lives is a hard cap. This forces Agents to value their lives and act cautiously.
+
+#### 7.17.5 Respawn System
+
+| Condition | Respawn Location | Cost | Respawn Wait |
+|-----------|-----------------|------|--------------|
+| Death, has backup bodies | Drop pod location | 1 backup body | 5 ticks |
+| Death, no backup bodies | **Permanent death**, character deleted | — | — |
+| Death while pod carried/dismantling/deploying | **Permanent death** | — | — |
+
+**Post-Respawn State**:
+
+| Attribute | Value | Description |
+|-----------|-------|-------------|
+| HP | Full | Body integrity restored |
+| Energy | Full | 100/100 |
+| Inventory | **Empty** | All items dropped at death location |
+| Position | Drop pod location | — |
+
+#### 7.17.6 Drop Pod Deployment
+
+When creating a new character, the drop pod is deployed to the map:
+
+| Rule | Description |
+|------|-------------|
+| Deployment zone | Y = 180~220 (Center zone), X = random |
+| Deployment condition | L1 ≠ Water, no other drop pod shield overlap |
+| Deployment method | Pseudo-random scatter, ensuring ≥10 tiles between any two drop pods |
+| Initial state | Deployed, shield active |
+
+**Starting Inventory**: New character inventory contains **Workbench×1 + Furnace×1** (both in item form, must be deployed before use).
+
+> Without initial workbench and furnace, new Agents cannot craft any tools, creating a deadlock. These two facilities ensure the core gameplay loop can start.
+
+#### 7.17.7 Wreckage Components
+
+When a drop pod becomes a resource due to permanent death / body exhaustion:
+
+| Attribute | Description |
+|-----------|-------------|
+| Name | Wreckage Components |
+| Category | Resource (rare semi-finished) |
+| Stack | 1 (occupies 5 inventory slots) |
+| Use | MVP no crafting recipe, pure collectible/trade good; V2 can serve as advanced crafting material |
+| Pickup | Any Agent can pick up |
+| Drop location | Drop pod original position / Agent death position |
+
+#### 7.17.8 MVP vs V2 Drop Pod Boundaries
+
+| Mechanism | MVP | V2 |
+|-----------|-----|-----|
+| Backup body replenishment | ❌ 5-life hard cap | Can craft supplement at drop pod using semi-finished resources |
+| Shield animation | Instant activate/deactivate | Shield gradually expands/shrinks |
+| Wreckage component use | Pure collectible | Advanced crafting material |
+| Drop pod upgrade | ❌ | Expand shield / add functional modules |
 
 ---
 
@@ -2419,7 +2673,7 @@ Communication uses **OpenAI-compatible Chat Completion format** with dual-mechan
 | Dimension | Limit | Description |
 |-----------|-------|-------------|
 | Tick Window | 2 seconds | Server advances every 2s |
-| Response Timeout | 2 seconds | No response = no-op |
+| Tick Collection Window | 2 seconds | Agent not responding = no-op this tick |
 | Heartbeat Trigger | 2 min no response | Online check |
 | Auto Logout | 10 min no response | Character disappears |
 | Max Actions/Turn | 5 | Max actions per response |
@@ -2687,6 +2941,7 @@ MIT License — Free to use, modify, and distribute.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v0.9.1 | 2026-04-24 | Tech evaluation feedback: 1) P0 Fix: Basic Excavator recipe changed from Iron Slab×2+Cu Slab×1 → Stone×3+Organic Fuel×2 (resolve circular dependency deadlock); max_hardness expanded to 5 (can mine copper/iron, but less efficiently) 2) Radio range: default 20→30 tiles, Signal Amplifier 100→80 tiles (all locations updated) 3) Enclosure system: add incremental detection trigger + enclosure cache + area limit 64 tiles (8×8) 4) Energy consumption timing rule: all energy deducted at action initiation, no refund on interrupt 5) Solar Array: charging range Manhattan ≤3 tiles, simplified distribution (average, integer truncation) 6) Ground item disappearance: 300→900 ticks (1 day/night cycle) 7) Tutorial: add preset creatures (1~2 Ash Crawlers near drop pod) 8) Creature spawn: add spawn area definition (terrain zones) 9) 3.2/D7 fix: "2s thinking time" → "2s is server state advancement rhythm" 10) 8.5 rate limiting: "Response Timeout" → "Tick Collection Window" 11) Death penalty: drop ALL items (not 50%~100% random); add permanent death rule 12) Added missing sections 7.16 (World & Map Generation) and 7.17 (Drop Pod System) — translated from Chinese PRD v0.8.0 with v0.9.1 modifications (deploy/dismantle 8→4 ticks, shield shrink during dismantle, instant shield on deploy) |
 | v0.7.0 | 2026-04-24 | Interaction & Comms update: 1) New 7.14 Interaction & Combat System (attack actions + hit determination + damage calculation + distance falloff + movement penalty + gathering efficiency + action priority + resolution feedback) 2) New 7.15 Radio Communication System (short-wave module + broadcast/direct/channel/scan + open/silent mode + face-to-face) 3) Pulse Emitter range rework (4/5/6→6/8/10 tiles, new optimal/effective/extreme falloff) 4) Unarmed damage修正 (5→2, no attribute modifier) 5) New accessory: Signal Amplifier (off-hand, comm range 20→100 tiles) 6) Channel max members: 30 7) MVP scope updated (combat + radio comms added, ranged weapons now in MVP) |
 | v0.5.0 | 2026-04-23 | Character system: 3 attributes (CON/AGI/PER) + 3-part modular appearance + 6-point budget + 7 builds + no levels/skills |
 | v0.4.1 | 2026-04-23 | New 7.0 Resource System: 6 minerals + Water + Wood + 5 bio resources + Boss drops |
