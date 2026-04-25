@@ -1,0 +1,1503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ember Protocol — Observer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;600;700&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-dark: #0A0E17;
+            --bg-panel: #111827;
+            --bg-card: #1F2937;
+            --border: #374151;
+            --text-primary: #F9FAFB;
+            --text-secondary: #9CA3AF;
+            --accent-cyan: #00D4AA;
+            --accent-blue: #0099FF;
+            --accent-red: #EF4444;
+            --accent-yellow: #F59E0B;
+            --accent-purple: #8B5CF6;
+        }
+
+        body {
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .pixel-font { font-family: 'Press Start 2P', monospace; }
+
+        /* ─── Header ─── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            height: 48px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header-title {
+            font-family: 'Press Start 2P', monospace;
+            font-size: 14px;
+            color: var(--accent-cyan);
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 16px;
+            font-size: 12px;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-secondary);
+        }
+
+        .stat-value {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 6px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        .btn-primary {
+            background: var(--accent-cyan);
+            color: var(--bg-dark);
+            border-color: var(--accent-cyan);
+        }
+
+        .btn-primary:hover { opacity: 0.85; }
+
+        .btn-secondary:hover { border-color: var(--accent-cyan); }
+
+        /* ─── Language Switcher ─── */
+        .lang-switch {
+            display: flex;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .lang-btn {
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .lang-btn.active {
+            background: var(--accent-cyan);
+            color: var(--bg-dark);
+        }
+
+        .lang-btn:hover:not(.active) {
+            color: var(--text-primary);
+        }
+
+        /* ─── Main Layout ─── */
+        .main {
+            display: flex;
+            height: calc(100vh - 48px);
+        }
+
+        /* ─── Map Canvas ─── */
+        .map-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #gameCanvas {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        #gameCanvas:active { cursor: grabbing; }
+
+        /* ─── Right Panel ─── */
+        .panel {
+            width: 320px;
+            background: var(--bg-panel);
+            border-left: 1px solid var(--border);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-section {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .panel-title {
+            font-family: 'Press Start 2P', monospace;
+            font-size: 10px;
+            color: var(--accent-cyan);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        /* ─── Agent Card ─── */
+        .agent-card {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .agent-card:hover {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 8px rgba(0, 212, 170, 0.2);
+        }
+
+        .agent-card.selected {
+            border: 1px solid var(--accent-cyan);
+        }
+
+        .agent-name {
+            font-weight: 700;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .agent-pos {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* ─── Health/Energy Bars ─── */
+        .bar-container { margin: 4px 0; }
+
+        .bar-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 2px;
+        }
+
+        .bar {
+            height: 6px;
+            background: var(--bg-dark);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        .bar-hp .bar-fill { background: var(--accent-red); }
+        .bar-energy .bar-fill { background: var(--accent-yellow); }
+
+        /* ─── Event Log ─── */
+        .event-log {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .event-item {
+            font-size: 11px;
+            padding: 4px 8px;
+            margin-bottom: 2px;
+            border-radius: 4px;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+        }
+
+        .event-item.weather { color: var(--accent-purple); }
+        .event-item.combat { color: var(--accent-red); }
+        .event-item.system { color: var(--accent-blue); }
+
+        /* ─── Day/Night Indicator ─── */
+        .day-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .day-icon { font-size: 20px; }
+        .day-text { font-size: 12px; font-weight: 600; }
+        .day-phase-day { color: var(--accent-yellow); }
+        .day-phase-night { color: var(--accent-purple); }
+        .day-phase-dusk { color: var(--accent-red); }
+        .day-phase-dawn { color: var(--accent-blue); }
+
+        /* ─── Weather Badge ─── */
+        .weather-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .weather-quiet { background: #064E3B; color: #34D399; }
+        .weather-storm { background: #7F1D1D; color: #F87171; }
+
+        /* ─── Legend ─── */
+        .legend {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            font-size: 10px;
+        }
+
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+        .legend-color { width: 12px; height: 12px; border-radius: 2px; }
+
+        /* ─── Tooltip ─── */
+        .tooltip {
+            position: absolute;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 11px;
+            pointer-events: none;
+            display: none;
+            z-index: 100;
+        }
+
+        /* ─── Zoom Controls ─── */
+        .zoom-controls {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .zoom-btn {
+            width: 32px;
+            height: 32px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .zoom-btn:hover { border-color: var(--accent-cyan); }
+
+        /* ─── Map Loading Indicator ─── */
+        .map-status {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            z-index: 10;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+
+        .map-status.loading { background: rgba(0,212,170,0.2); color: var(--accent-cyan); }
+        .map-status.complete { background: rgba(34,197,94,0.2); color: #22C55E; }
+
+        /* ─── No Agents Placeholder ─── */
+        .no-agents {
+            text-align: center;
+            padding: 16px 8px;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .no-agents .link {
+            color: var(--accent-cyan);
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        /* ─── Agent Detail Modal ─── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            width: 420px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-title {
+            font-family: 'Press Start 2P', monospace;
+            font-size: 12px;
+            color: var(--accent-cyan);
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+            background: var(--bg-card);
+        }
+
+        .modal-body {
+            padding: 16px 20px;
+        }
+
+        .detail-section {
+            margin-bottom: 16px;
+        }
+
+        .detail-section-title {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .detail-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .detail-value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .attr-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            background: var(--bg-card);
+        }
+
+        .attr-con { color: #F97316; }
+        .attr-agi { color: #3B82F6; }
+        .attr-per { color: #A855F7; }
+
+        /* Inventory Grid */
+        .inv-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 4px;
+        }
+
+        .inv-slot {
+            aspect-ratio: 1;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            color: var(--text-secondary);
+            padding: 2px;
+            text-align: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .inv-slot.has-item {
+            border-color: var(--accent-cyan);
+            background: var(--bg-card);
+        }
+
+        .inv-slot .item-name {
+            font-size: 8px;
+            font-weight: 600;
+            color: var(--text-primary);
+            line-height: 1.2;
+            max-height: 24px;
+            overflow: hidden;
+        }
+
+        .inv-slot .item-count {
+            position: absolute;
+            bottom: 1px;
+            right: 3px;
+            font-size: 8px;
+            font-weight: 700;
+            color: var(--accent-yellow);
+        }
+
+        .inv-slot .item-durability {
+            font-size: 7px;
+            color: var(--accent-red);
+        }
+
+        /* Equipment Slots */
+        .equip-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+        }
+
+        .equip-slot {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px;
+            text-align: center;
+            font-size: 10px;
+        }
+
+        .equip-slot-label {
+            font-size: 8px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .equip-slot-item {
+            font-weight: 600;
+            color: var(--accent-cyan);
+            font-size: 11px;
+        }
+
+        .equip-slot-empty {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .effect-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            background: #7F1D1D;
+            color: #F87171;
+            margin: 2px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-idle { background: #064E3B; color: #34D399; }
+        .status-traveling { background: #1E3A5F; color: #60A5FA; }
+        .status-dead { background: #7F1D1D; color: #F87171; }
+        .status-crafting { background: #4C1D95; color: #A78BFA; }
+        .status-building { background: #78350F; color: #FCD34D; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <div class="header-title">EMBER PROTOCOL</div>
+            <div class="header-stats">
+                <div class="stat-item">
+                    <span data-i18n="tick">Tick</span>
+                    <span class="stat-value" id="tickCounter">0</span>
+                </div>
+                <div class="stat-item">
+                    <span data-i18n="online">Online</span>
+                    <span class="stat-value" id="agentCount">0</span>
+                </div>
+                <div class="stat-item">
+                    <span>Map</span>
+                    <span class="stat-value" id="mapSize">400x400</span>
+                </div>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="lang-switch">
+                <button class="lang-btn active" onclick="setLang('en')">EN</button>
+                <button class="lang-btn" onclick="setLang('zh')">中文</button>
+            </div>
+            <a href="/register" class="btn btn-primary" id="registerBtn" data-i18n="deployAgent">+ Deploy Agent</a>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="map-container">
+            <canvas id="gameCanvas"></canvas>
+            <div class="tooltip" id="tooltip"></div>
+            <div class="zoom-controls">
+                <button class="zoom-btn" onclick="zoomIn()">+</button>
+                <button class="zoom-btn" onclick="zoomOut()">-</button>
+                <button class="zoom-btn" onclick="resetView()" style="font-size:12px">H</button>
+            </div>
+            <div class="map-status loading" id="mapStatus" data-i18n="loadingMap">Loading map...</div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-section">
+                <div class="panel-title" data-i18n="world">World</div>
+                <div class="day-indicator" id="dayIndicator">
+                    <span class="day-icon">SUN</span>
+                    <span class="day-text day-phase-day" id="dayPhase" data-i18n="day">Day</span>
+                </div>
+                <div id="weatherBadge" class="weather-badge weather-quiet" data-i18n="quiet">Quiet</div>
+            </div>
+
+            <div class="panel-section">
+                <div class="panel-title" data-i18n="agents">Agents</div>
+                <div id="agentList">
+                    <div class="no-agents">
+                        <span data-i18n="noAgents">No agents deployed yet.</span><br>
+                        <span class="link" onclick="window.location.href='/register'" data-i18n="deployFirst">Deploy your first Agent</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section" style="flex:1; display:flex; flex-direction:column;">
+                <div class="panel-title" data-i18n="eventLog">Event Log</div>
+                <div class="event-log" id="eventLog"></div>
+            </div>
+
+            <div class="panel-section">
+                <div class="panel-title" data-i18n="terrainLegend">Terrain Legend</div>
+                <div class="legend" id="terrainLegend">
+                    <div class="legend-item"><div class="legend-color" style="background:#8B7355"></div> <span data-i18n="legendFlat">Flat</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#C2B280"></div> <span data-i18n="legendSand">Sand</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#6B7280"></div> <span data-i18n="legendRock">Rock</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#4ADE80"></div> <span data-i18n="legendHighland">Highland</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#1E3A5F"></div> <span data-i18n="legendTrench">Trench</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background:#3B82F6"></div> <span data-i18n="legendWater">Water</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Detail Modal -->
+    <div class="modal-overlay" id="agentModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title" data-i18n="agentDetail">Agent Detail</div>
+                <button class="modal-close" onclick="closeAgentModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="agentModalBody">
+                <!-- Filled dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ─── i18n System ──────────────────────────────────────────────
+    const I18N = {
+        en: {
+            tick: 'Tick',
+            online: 'Online',
+            deployAgent: '+ Deploy Agent',
+            loadingMap: 'Loading map...',
+            mapLoaded: 'Map loaded',
+            world: 'World',
+            day: 'Day',
+            dusk: 'Dusk',
+            night: 'Night',
+            dawn: 'Dawn',
+            quiet: 'Quiet',
+            radiationStorm: 'Radiation Storm',
+            agents: 'Agents',
+            noAgents: 'No agents deployed yet.',
+            deployFirst: 'Deploy your first Agent',
+            eventLog: 'Event Log',
+            terrainLegend: 'Terrain Legend',
+            legendFlat: 'Flat',
+            legendSand: 'Sand',
+            legendRock: 'Rock',
+            legendHighland: 'Highland',
+            legendTrench: 'Trench',
+            legendWater: 'Water',
+            hp: 'HP',
+            energy: 'Energy',
+            // Terrain names (tooltip)
+            terrainFlat: 'Flat',
+            terrainSand: 'Sand',
+            terrainRock: 'Rock',
+            terrainHighland: 'Highland',
+            terrainTrench: 'Trench',
+            terrainWater: 'Water',
+            // Cover names (tooltip)
+            coverVegAshbrush: 'Ashbrush',
+            coverVegGreytree: 'Grey Tree',
+            coverVegWallmoss: 'Wall Moss',
+            coverOreStone: 'Stone Deposit',
+            coverOreOrganic: 'Organic Fuel',
+            coverOreCopper: 'Copper Ore',
+            coverOreIron: 'Iron Ore',
+            coverOreUranium: 'Uranium Ore',
+            coverOreGold: 'Gold Ore',
+            coverFloor: 'Floor',
+            coverRubble: 'Rubble',
+            // Zone names (tooltip)
+            zoneCenter: 'Center Zone',
+            zoneT1: 'Tier 1',
+            zoneT2: 'Tier 2',
+            zoneT3: 'Tier 3',
+            zoneT4: 'Tier 4',
+            agentDetail: 'Agent Detail',
+            attributes: 'Attributes',
+            equipment: 'Equipment',
+            inventory: 'Inventory',
+            mainHand: 'Main Hand',
+            offHand: 'Off Hand',
+            armor: 'Armor',
+            empty: 'Empty',
+            backupBodies: 'Backup Bodies',
+            activeEffects: 'Active Effects',
+            none: 'None',
+            slotUsed: 'slots used',
+        },
+        zh: {
+            tick: '回合',
+            online: '在线',
+            deployAgent: '+ 部署智能体',
+            loadingMap: '加载地图...',
+            mapLoaded: '地图已加载',
+            world: '世界',
+            day: '白天',
+            dusk: '黄昏',
+            night: '夜晚',
+            dawn: '黎明',
+            quiet: '平静',
+            radiationStorm: '辐射风暴',
+            agents: '智能体',
+            noAgents: '暂无部署的智能体。',
+            deployFirst: '部署你的第一个智能体',
+            eventLog: '事件日志',
+            terrainLegend: '地形图例',
+            legendFlat: '平地',
+            legendSand: '沙地',
+            legendRock: '岩石',
+            legendHighland: '高地',
+            legendTrench: '沟壑',
+            legendWater: '水域',
+            hp: '生命',
+            energy: '能量',
+            // 地形名称（提示框）
+            terrainFlat: '平地',
+            terrainSand: '沙地',
+            terrainRock: '岩石',
+            terrainHighland: '高地',
+            terrainTrench: '沟壑',
+            terrainWater: '水域',
+            // 覆盖物名称（提示框）
+            coverVegAshbrush: '灰烬灌木',
+            coverVegGreytree: '灰树',
+            coverVegWallmoss: '墙藓',
+            coverOreStone: '石头矿脉',
+            coverOreOrganic: '有机燃料',
+            coverOreCopper: '铜矿',
+            coverOreIron: '铁矿',
+            coverOreUranium: '铀矿',
+            coverOreGold: '金矿',
+            coverFloor: '地板',
+            coverRubble: '废墟',
+            // 区域名称（提示框）
+            zoneCenter: '中心区',
+            zoneT1: '一区',
+            zoneT2: '二区',
+            zoneT3: '三区',
+            zoneT4: '四区',
+            agentDetail: '角色详情',
+            attributes: '属性',
+            equipment: '装备',
+            inventory: '背包',
+            mainHand: '主手',
+            offHand: '副手',
+            armor: '护甲',
+            empty: '空',
+            backupBodies: '备用机体',
+            activeEffects: '当前效果',
+            none: '无',
+            slotUsed: '格已用',
+        }
+    };
+
+    let currentLang = localStorage.getItem('ember-lang') || 'en';
+
+    function t(key) {
+        return (I18N[currentLang] && I18N[currentLang][key]) || I18N.en[key] || key;
+    }
+
+    function setLang(lang) {
+        currentLang = lang;
+        localStorage.setItem('ember-lang', lang);
+        document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+        applyI18n();
+        draw();  // Redraw to update any canvas text
+    }
+
+    function applyI18n() {
+        // Update all data-i18n elements
+        document.querySelectorAll('[data-i18n]').forEach(el => {
+            const key = el.getAttribute('data-i18n');
+            const text = t(key);
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                el.placeholder = text;
+            } else {
+                el.textContent = text;
+            }
+        });
+
+        // Update active language button
+        document.querySelectorAll('.lang-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.textContent.trim() === (currentLang === 'en' ? 'EN' : '中文'));
+        });
+
+        // Update weather badge if visible
+        const badge = document.getElementById('weatherBadge');
+        if (badge.classList.contains('weather-storm')) {
+            badge.textContent = t('radiationStorm');
+        } else {
+            badge.textContent = t('quiet');
+        }
+
+        // Re-render agent list with current language
+        updateAgentList();
+
+        // Update map status
+        updateMapStatus();
+    }
+
+    // ─── State ───────────────────────────────────────────────────
+    const API_BASE = window.location.origin;
+    const MAP_SIZE = 400;
+    const CHUNK_SIZE = 50;
+
+    let mapTiles = {};       // "{x},{y}" -> tile (dedup by coordinate)
+    let mapData = [];        // flat array for iteration
+    let mapLoadingComplete = false;
+    let mapLoadedChunks = new Set();
+
+    let agents = [];
+    let selectedAgent = null;
+
+    // View state: center of viewport in tile coordinates
+    let centerTileX = 200;
+    let centerTileY = 200;
+    let zoom = 0.8;
+    const MIN_ZOOM = 0.3;
+    const MAX_ZOOM = 10;
+    const BASE_TILE_PX = 8;
+
+    let isDragging = false;
+    let dragStartCX = 0, dragStartCY = 0;
+    let dragStartCenterX = 0, dragStartCenterY = 0;
+
+    let currentTick = 0;
+
+    // ─── Terrain Colors ──────────────────────────────────────────
+    const TERRAIN_COLORS = {
+        flat: '#8B7355', rock: '#6B7280', sand: '#C2B280',
+        highland: '#4ADE80', trench: '#1E3A5F', water: '#3B82F6',
+    };
+
+    const COVER_COLORS = {
+        veg_ashbrush: '#22C55E', veg_greytree: '#16A34A', veg_wallmoss: '#15803D',
+        ore_stone: '#A8A29E', ore_organic: '#D97706', ore_copper: '#F97316',
+        ore_iron: '#EF4444', ore_uranium: '#A855F7', ore_gold: '#FCD34D',
+        floor: '#D4D4D8', rubble: '#78716C',
+    };
+
+    const AGENT_COLORS = ['#00D4AA', '#0099FF', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+
+    // ─── Canvas Setup ────────────────────────────────────────────
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+        canvas.width = canvas.parentElement.clientWidth;
+        canvas.height = canvas.parentElement.clientHeight;
+        draw();
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // ─── Coordinate Helpers ──────────────────────────────────────
+    function tileToScreen(tx, ty) {
+        const ts = BASE_TILE_PX * zoom;
+        return {
+            x: (tx - centerTileX) * ts + canvas.width / 2,
+            y: (ty - centerTileY) * ts + canvas.height / 2,
+        };
+    }
+
+    function screenToTile(sx, sy) {
+        const ts = BASE_TILE_PX * zoom;
+        return {
+            x: (sx - canvas.width / 2) / ts + centerTileX,
+            y: (sy - canvas.height / 2) / ts + centerTileY,
+        };
+    }
+
+    function getVisibleBounds() {
+        const ts = BASE_TILE_PX * zoom;
+        const halfW = canvas.width / 2 / ts;
+        const halfH = canvas.height / 2 / ts;
+        return {
+            minX: Math.floor(centerTileX - halfW - 1),
+            maxX: Math.ceil(centerTileX + halfW + 1),
+            minY: Math.floor(centerTileY - halfH - 1),
+            maxY: Math.ceil(centerTileY + halfH + 1),
+        };
+    }
+
+    // ─── Drawing ─────────────────────────────────────────────────
+    function draw() {
+        ctx.fillStyle = '#0A0E17';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const ts = BASE_TILE_PX * zoom;
+        const bounds = getVisibleBounds();
+
+        for (let ty = Math.max(0, bounds.minY); ty <= Math.min(MAP_SIZE - 1, bounds.maxY); ty++) {
+            for (let tx = Math.max(0, bounds.minX); tx <= Math.min(MAP_SIZE - 1, bounds.maxX); tx++) {
+                const tile = mapTiles[`${tx},${ty}`];
+                if (!tile) continue;
+
+                const { x: px, y: py } = tileToScreen(tx, ty);
+                if (px + ts < 0 || px > canvas.width || py + ts < 0 || py > canvas.height) continue;
+
+                ctx.fillStyle = TERRAIN_COLORS[tile.terrain] || '#333';
+                ctx.fillRect(px, py, ts, ts);
+
+                if (tile.cover) {
+                    ctx.fillStyle = COVER_COLORS[tile.cover] || '#666';
+                    ctx.globalAlpha = 0.7;
+                    ctx.fillRect(px + 1, py + 1, ts - 2, ts - 2);
+                    ctx.globalAlpha = 1;
+                }
+
+                if (tile.building) {
+                    ctx.fillStyle = '#F9FAFB';
+                    ctx.fillRect(px + 2, py + 2, ts - 4, ts - 4);
+                }
+
+                if (zoom >= 3) {
+                    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+                    ctx.strokeRect(px, py, ts, ts);
+                }
+            }
+        }
+
+        // Draw agents
+        agents.forEach((agent, i) => {
+            if (!agent.alive) return;
+            const { x: px, y: py } = tileToScreen(agent.position.x, agent.position.y);
+            const cx = px + ts / 2;
+            const cy = py + ts / 2;
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, Math.max(3, ts / 3), 0, Math.PI * 2);
+            ctx.fillStyle = AGENT_COLORS[i % AGENT_COLORS.length];
+            ctx.fill();
+
+            if (selectedAgent && selectedAgent.id === agent.id) {
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            if (zoom >= 1.5) {
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = `${Math.max(8, 10 * zoom / 2)}px Inter`;
+                ctx.textAlign = 'center';
+                ctx.fillText(agent.name, cx, cy - ts / 2 - 4);
+            }
+
+            if (zoom >= 1) {
+                const barW = ts * 0.8;
+                const barH = 2;
+                const barX = cx - barW / 2;
+                const barY = cy + ts / 3 + 2;
+                ctx.fillStyle = '#1F2937';
+                ctx.fillRect(barX, barY, barW, barH);
+                ctx.fillStyle = '#EF4444';
+                ctx.fillRect(barX, barY, barW * (agent.hp / agent.max_hp), barH);
+            }
+        });
+
+        // Coordinate overlay at low zoom
+        if (zoom < 0.5) {
+            ctx.fillStyle = 'rgba(0,212,170,0.4)';
+            ctx.font = '10px Inter';
+            ctx.textAlign = 'center';
+            for (let x = 0; x < MAP_SIZE; x += 50) {
+                for (let y = 0; y < MAP_SIZE; y += 50) {
+                    const { x: px, y: py } = tileToScreen(x, y);
+                    ctx.fillText(`${x},${y}`, px, py);
+                }
+            }
+        }
+    }
+
+    // ─── Data Fetching ───────────────────────────────────────────
+    async function fetchMapChunk(cx, cy, w, h) {
+        try {
+            const x0 = Math.max(0, cx);
+            const y0 = Math.max(0, cy);
+            const x1 = Math.min(MAP_SIZE, cx + w);
+            const y1 = Math.min(MAP_SIZE, cy + h);
+            if (x0 >= x1 || y0 >= y1) return;
+
+            const resp = await fetch(`${API_BASE}/api/v1/observer/map?x=${x0}&y=${y0}&width=${x1-x0}&height=${y1-y0}`);
+            const data = await resp.json();
+            if (data.tiles) {
+                for (const tile of data.tiles) {
+                    mapTiles[`${tile.x},${tile.y}`] = tile;
+                }
+            }
+        } catch (e) {
+            console.error('Failed to fetch map chunk:', e);
+        }
+    }
+
+    async function fetchVisibleMap() {
+        const bounds = getVisibleBounds();
+        const margin = 5;
+        const x0 = Math.max(0, Math.floor(bounds.minX - margin));
+        const y0 = Math.max(0, Math.floor(bounds.minY - margin));
+        const x1 = Math.min(MAP_SIZE, Math.ceil(bounds.maxX + margin));
+        const y1 = Math.min(MAP_SIZE, Math.ceil(bounds.maxY + margin));
+
+        const chunkX0 = Math.floor(x0 / CHUNK_SIZE);
+        const chunkY0 = Math.floor(y0 / CHUNK_SIZE);
+        const chunkX1 = Math.floor(x1 / CHUNK_SIZE);
+        const chunkY1 = Math.floor(y1 / CHUNK_SIZE);
+
+        const fetches = [];
+        for (let cy = chunkY0; cy <= chunkY1; cy++) {
+            for (let cx = chunkX0; cx <= chunkX1; cx++) {
+                const key = `${cx * CHUNK_SIZE},${cy * CHUNK_SIZE}`;
+                if (!mapLoadedChunks.has(key)) {
+                    mapLoadedChunks.add(key);
+                    fetches.push(fetchMapChunk(cx * CHUNK_SIZE, cy * CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE));
+                }
+            }
+        }
+        if (fetches.length > 0) {
+            await Promise.all(fetches);
+            updateMapStatus();
+        }
+    }
+
+    async function fetchInitialMap() {
+        await fetchMapChunk(150, 150, 100, 100);
+        mapLoadedChunks.add('150,150');
+        draw();
+        await fetchVisibleMap();
+        draw();
+    }
+
+    function updateMapStatus() {
+        const totalChunks = (MAP_SIZE / CHUNK_SIZE) * (MAP_SIZE / CHUNK_SIZE);
+        const loaded = mapLoadedChunks.size;
+        const pct = Math.round(loaded / totalChunks * 100);
+        const el = document.getElementById('mapStatus');
+        if (pct >= 100) {
+            el.className = 'map-status complete';
+            el.textContent = `${t('mapLoaded')} (${Object.keys(mapTiles).length} tiles)`;
+            setTimeout(() => { el.style.opacity = '0'; }, 3000);
+            mapLoadingComplete = true;
+        } else {
+            el.className = 'map-status loading';
+            el.textContent = `${t('loadingMap')} ${pct}%`;
+        }
+    }
+
+    async function fetchAgents() {
+        try {
+            const resp = await fetch(`${API_BASE}/api/v1/observer/agents`);
+            const data = await resp.json();
+            agents = data.agents || [];
+            updateAgentList();
+            document.getElementById('agentCount').textContent = agents.filter(a => a.alive).length;
+        } catch (e) {
+            console.error('Failed to fetch agents:', e);
+        }
+    }
+
+    async function fetchState() {
+        try {
+            const resp = await fetch(`${API_BASE}/api/v1/observer/state`);
+            const data = await resp.json();
+            currentTick = data.tick || 0;
+            document.getElementById('tickCounter').textContent = currentTick;
+
+            const phase = data.day_phase || 'day';
+            const dayIcons = { day: 'SUN', dusk: 'DU', night: 'MON', dawn: 'DAWN' };
+            document.getElementById('dayIndicator').querySelector('.day-icon').textContent = dayIcons[phase];
+            const phaseEl = document.getElementById('dayPhase');
+            phaseEl.textContent = t(phase);
+            phaseEl.className = `day-text day-phase-${phase}`;
+
+            const weather = data.weather || 'quiet';
+            const badge = document.getElementById('weatherBadge');
+            if (weather === 'radiation_storm') {
+                badge.className = 'weather-badge weather-storm';
+                badge.textContent = t('radiationStorm');
+            } else {
+                badge.className = 'weather-badge weather-quiet';
+                badge.textContent = t('quiet');
+            }
+        } catch (e) {
+            console.error('Failed to fetch state:', e);
+        }
+    }
+
+    function updateAgentList() {
+        const list = document.getElementById('agentList');
+        const aliveAgents = agents.filter(a => a.alive);
+        if (aliveAgents.length === 0) {
+            list.innerHTML = `<div class="no-agents"><span data-i18n="noAgents">${t('noAgents')}</span><br><span class="link" onclick="window.location.href='/register'" data-i18n="deployFirst">${t('deployFirst')}</span></div>`;
+            return;
+        }
+        list.innerHTML = '';
+        aliveAgents.forEach((agent, i) => {
+            const card = document.createElement('div');
+            card.className = `agent-card${selectedAgent && selectedAgent.id === agent.id ? ' selected' : ''}`;
+            card.onclick = () => selectAgent(agent);
+            card.innerHTML = `
+                <div class="agent-name" style="color:${AGENT_COLORS[i % AGENT_COLORS.length]}">${agent.name}</div>
+                <div class="agent-pos">(${agent.position.x}, ${agent.position.y}) - ${agent.status}</div>
+                <div class="bar-container bar-hp">
+                    <div class="bar-label"><span>${t('hp')}</span><span>${agent.hp}/${agent.max_hp}</span></div>
+                    <div class="bar"><div class="bar-fill" style="width:${agent.hp / agent.max_hp * 100}%"></div></div>
+                </div>
+                <div class="bar-container bar-energy">
+                    <div class="bar-label"><span>${t('energy')}</span><span>${agent.energy}</span></div>
+                    <div class="bar"><div class="bar-fill" style="width:${agent.energy}%"></div></div>
+                </div>
+            `;
+            list.appendChild(card);
+        });
+    }
+
+    function selectAgent(agent) {
+        selectedAgent = agent;
+        centerTileX = agent.position.x;
+        centerTileY = agent.position.y;
+        fetchVisibleMap();
+        updateAgentList();
+        draw();
+        openAgentModal(agent);
+    }
+
+    // ─── Agent Detail Modal ──────────────────────────────────────
+    async function openAgentModal(agent) {
+        const modal = document.getElementById('agentModal');
+        const body = document.getElementById('agentModalBody');
+
+        body.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-secondary)">${currentLang === 'zh' ? '加载中...' : 'Loading...'}</div>`;
+        modal.classList.add('active');
+
+        try {
+            const resp = await fetch(`${API_BASE}/api/v1/observer/agents/${agent.id}`);
+            const data = await resp.json();
+            renderAgentDetail(data);
+        } catch (e) {
+            body.innerHTML = `<div style="text-align:center;padding:20px;color:var(--accent-red)">Error: ${e.message}</div>`;
+        }
+    }
+
+    function closeAgentModal() {
+        document.getElementById('agentModal').classList.remove('active');
+    }
+
+    // Close modal on overlay click
+    document.getElementById('agentModal').addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeAgentModal();
+    });
+
+    // Close modal on Escape
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeAgentModal();
+    });
+
+    function renderAgentDetail(data) {
+        const body = document.getElementById('agentModalBody');
+        const lang = currentLang;
+        const useZh = lang === 'zh';
+
+        const statusClass = {
+            idle: 'status-idle', traveling: 'status-traveling',
+            dead: 'status-dead', permadead: 'status-dead',
+            crafting: 'status-crafting', building: 'status-building',
+        }[data.status] || 'status-idle';
+
+        const statusText = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+
+        // Attributes
+        const attrs = data.attributes || {};
+        const attrHtml = `
+            <span class="attr-badge attr-con">CON ${attrs.constitution || 0}</span>
+            <span class="attr-badge attr-agi">AGI ${attrs.agility || 0}</span>
+            <span class="attr-badge attr-per">PER ${attrs.perception || 0}</span>
+        `;
+
+        // Equipment
+        const equipSlots = [
+            { key: 'main_hand', label: t('mainHand') },
+            { key: 'off_hand', label: t('offHand') },
+            { key: 'armor', label: t('armor') },
+        ];
+        let equipHtml = '';
+        for (const slot of equipSlots) {
+            const item = data.equipment?.[slot.key];
+            const name = item ? (useZh && item.name_zh ? item.name_zh : item.name || item.item_id) : t('empty');
+            const cls = item ? 'equip-slot-item' : 'equip-slot-empty';
+            const dur = item?.durability ? `<br><span style="font-size:9px;color:var(--accent-yellow)">${item.durability}</span>` : '';
+            equipHtml += `
+                <div class="equip-slot">
+                    <div class="equip-slot-label">${slot.label}</div>
+                    <div class="${cls}">${name}${dur}</div>
+                </div>
+            `;
+        }
+
+        // Inventory
+        const inv = data.inventory || { items: [], slots_used: 0, slots_max: 20 };
+        let invHtml = '';
+        for (let i = 0; i < inv.slots_max; i++) {
+            const item = inv.items[i];
+            if (item) {
+                const name = useZh && item.name_zh ? item.name_zh : item.name || item.item_id;
+                const cls = item.type === 'weapon' ? '#EF4444' :
+                           item.type === 'tool' ? '#F59E0B' :
+                           item.type === 'armor' ? '#3B82F6' :
+                           item.type === 'consumable' ? '#22C55E' :
+                           item.type === 'resource' ? '#A8A29E' : '#9CA3AF';
+                const countHtml = item.amount > 1 ? `<span class="item-count">x${item.amount}</span>` : '';
+                const durHtml = item.durability ? `<span class="item-durability">${item.durability}</span>` : '';
+                invHtml += `
+                    <div class="inv-slot has-item" style="border-color:${cls}33">
+                        <div class="item-name" style="color:${cls}">${name}</div>
+                        ${durHtml}
+                        ${countHtml}
+                    </div>
+                `;
+            } else {
+                invHtml += `<div class="inv-slot"></div>`;
+            }
+        }
+
+        // Effects
+        const effects = (data.active_effects || []);
+        const effectsHtml = effects.length > 0
+            ? effects.map(e => `<span class="effect-tag">${e}</span>`).join('')
+            : `<span style="color:var(--text-secondary);font-size:11px">${t('none')}</span>`;
+
+        body.innerHTML = `
+            <!-- Basic Info -->
+            <div class="detail-section">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <div style="font-size:16px;font-weight:700;color:var(--accent-cyan)">${data.name}</div>
+                    <span class="status-badge ${statusClass}">${statusText}</span>
+                </div>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">${t('hp')}</div>
+                        <div class="bar-container bar-hp">
+                            <div class="bar"><div class="bar-fill" style="width:${data.hp / data.max_hp * 100}%"></div></div>
+                            <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${data.hp} / ${data.max_hp}</div>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">${t('energy')}</div>
+                        <div class="bar-container bar-energy">
+                            <div class="bar"><div class="bar-fill" style="width:${data.energy / data.max_energy * 100}%"></div></div>
+                            <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${data.energy} / ${data.max_energy}</div>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">${useZh ? '位置' : 'Position'}</div>
+                        <div class="detail-value">(${data.position.x}, ${data.position.y})</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">${t('backupBodies')}</div>
+                        <div class="detail-value">${data.backup_bodies}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attributes -->
+            <div class="detail-section">
+                <div class="detail-section-title">${t('attributes')}</div>
+                <div style="display:flex;gap:8px">${attrHtml}</div>
+            </div>
+
+            <!-- Active Effects -->
+            <div class="detail-section">
+                <div class="detail-section-title">${t('activeEffects')}</div>
+                ${effectsHtml}
+            </div>
+
+            <!-- Equipment -->
+            <div class="detail-section">
+                <div class="detail-section-title">${t('equipment')}</div>
+                <div class="equip-grid">${equipHtml}</div>
+            </div>
+
+            <!-- Inventory -->
+            <div class="detail-section">
+                <div class="detail-section-title">${t('inventory')} <span style="color:var(--text-secondary);font-weight:400">${inv.slots_used}/${inv.slots_max} ${t('slotUsed')}</span></div>
+                <div class="inv-grid">${invHtml}</div>
+            </div>
+        `;
+    }
+
+    // ─── Interactions ────────────────────────────────────────────
+    canvas.addEventListener('mousedown', e => {
+        isDragging = true;
+        dragStartCX = e.clientX;
+        dragStartCY = e.clientY;
+        dragStartCenterX = centerTileX;
+        dragStartCenterY = centerTileY;
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        if (isDragging) {
+            const ts = BASE_TILE_PX * zoom;
+            const dx = (e.clientX - dragStartCX) / ts;
+            const dy = (e.clientY - dragStartCY) / ts;
+            centerTileX = dragStartCenterX - dx;
+            centerTileY = dragStartCenterY - dy;
+            draw();
+        }
+
+        const rect = canvas.getBoundingClientRect();
+        const { x: tileX, y: tileY } = screenToTile(e.clientX - rect.left, e.clientY - rect.top);
+        const tx = Math.floor(tileX);
+        const ty = Math.floor(tileY);
+
+        const tile = mapTiles[`${tx},${ty}`];
+        const tooltip = document.getElementById('tooltip');
+
+        if (tile) {
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX + 12) + 'px';
+            tooltip.style.top = (e.clientY - 40) + 'px';
+
+            // Translate terrain and cover names
+            const terrainI18n = {
+                flat: t('terrainFlat'), sand: t('terrainSand'), rock: t('terrainRock'),
+                highland: t('terrainHighland'), trench: t('terrainTrench'), water: t('terrainWater'),
+            };
+            const coverI18n = {
+                veg_ashbrush: t('coverVegAshbrush'), veg_greytree: t('coverVegGreytree'),
+                veg_wallmoss: t('coverVegWallmoss'), ore_stone: t('coverOreStone'),
+                ore_organic: t('coverOreOrganic'), ore_copper: t('coverOreCopper'),
+                ore_iron: t('coverOreIron'), ore_uranium: t('coverOreUranium'),
+                ore_gold: t('coverOreGold'), floor: t('coverFloor'), rubble: t('coverRubble'),
+            };
+
+            let html = `<strong>(${tile.x}, ${tile.y})</strong> ${terrainI18n[tile.terrain] || tile.terrain}`;
+            if (tile.cover) html += `<br>${coverI18n[tile.cover] || tile.cover}`;
+            if (tile.building) html += `<br>${tile.building}`;
+            if (tile.effects) html += `<br>${tile.effects.join(', ')}`;
+            tooltip.innerHTML = html;
+        } else {
+            tooltip.style.display = 'none';
+        }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            fetchVisibleMap();
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isDragging) {
+            isDragging = false;
+            fetchVisibleMap();
+        }
+        document.getElementById('tooltip').style.display = 'none';
+    });
+
+    canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        const beforeTile = screenToTile(mx, my);
+        const factor = e.deltaY > 0 ? 0.8 : 1.25;
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+        const afterTile = screenToTile(mx, my);
+
+        centerTileX += beforeTile.x - afterTile.x;
+        centerTileY += beforeTile.y - afterTile.y;
+
+        draw();
+        fetchVisibleMap();
+    });
+
+    function zoomIn() {
+        zoom = Math.min(MAX_ZOOM, zoom * 1.3);
+        draw();
+        fetchVisibleMap();
+    }
+
+    function zoomOut() {
+        zoom = Math.max(MIN_ZOOM, zoom / 1.3);
+        draw();
+        fetchVisibleMap();
+    }
+
+    function resetView() {
+        centerTileX = 200;
+        centerTileY = 200;
+        zoom = 0.8;
+        draw();
+        fetchVisibleMap();
+    }
+
+    // ─── Init ────────────────────────────────────────────────────
+    async function init() {
+        // Apply saved language
+        applyI18n();
+
+        await Promise.all([fetchInitialMap(), fetchAgents(), fetchState()]);
+        draw();
+
+        setInterval(async () => {
+            await Promise.all([fetchAgents(), fetchState()]);
+            draw();
+        }, 2000);
+
+        setInterval(async () => {
+            if (!mapLoadingComplete) {
+                const chunks = [];
+                const n = MAP_SIZE / CHUNK_SIZE;
+                for (let cy = 0; cy < n; cy++) {
+                    for (let cx = 0; cx < n; cx++) {
+                        const key = `${cx * CHUNK_SIZE},${cy * CHUNK_SIZE}`;
+                        if (!mapLoadedChunks.has(key)) {
+                            chunks.push([cx * CHUNK_SIZE, cy * CHUNK_SIZE]);
+                        }
+                    }
+                }
+                if (chunks.length === 0) {
+                    mapLoadingComplete = true;
+                    updateMapStatus();
+                    return;
+                }
+                const batch = chunks.slice(0, 4);
+                await Promise.all(batch.map(([x, y]) => {
+                    mapLoadedChunks.add(`${x},${y}`);
+                    return fetchMapChunk(x, y, CHUNK_SIZE, CHUNK_SIZE);
+                }));
+                updateMapStatus();
+            }
+        }, 2000);
+    }
+
+    init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ember Protocol — Register</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;600;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0A0E17; --card: #1F2937; --border: #374151;
+            --text: #F9FAFB; --text2: #9CA3AF;
+            --cyan: #00D4AA; --blue: #0099FF; --red: #EF4444;
+        }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .pixel { font-family: 'Press Start 2P', monospace; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 32px; width: 480px; }
+        .title { font-family: 'Press Start 2P', monospace; font-size: 18px; color: var(--cyan); text-align: center; margin-bottom: 8px; }
+        .subtitle { text-align: center; color: var(--text2); font-size: 13px; margin-bottom: 24px; }
+        .step { margin-bottom: 20px; }
+        .step-title { font-size: 12px; font-weight: 700; color: var(--cyan); margin-bottom: 8px; text-transform: uppercase; }
+        .part-group { display: flex; gap: 8px; margin-bottom: 12px; }
+        .part-btn { flex: 1; padding: 10px; background: var(--bg); border: 2px solid var(--border); border-radius: 8px; cursor: pointer; text-align: center; transition: all 0.2s; color: var(--text); font-size: 12px; }
+        .part-btn:hover { border-color: var(--cyan); }
+        .part-btn.selected { border-color: var(--cyan); background: rgba(0,212,170,0.1); }
+        .part-btn .tier-val { font-size: 18px; font-weight: 700; display: block; margin-bottom: 2px; }
+        input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; margin-bottom: 8px; }
+        input:focus { outline: none; border-color: var(--cyan); }
+        .attr-display { display: flex; gap: 16px; justify-content: center; margin: 12px 0; }
+        .attr-item { text-align: center; }
+        .attr-val { font-size: 20px; font-weight: 700; }
+        .attr-label { font-size: 10px; color: var(--text2); }
+        .budget { text-align: center; font-size: 12px; margin-bottom: 12px; }
+        .budget-ok { color: var(--cyan); }
+        .budget-over { color: var(--red); }
+        .submit-btn { width: 100%; padding: 14px; background: var(--cyan); color: var(--bg); border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 12px; }
+        .submit-btn:hover { opacity: 0.9; }
+        .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .status { margin-top: 12px; padding: 10px; border-radius: 8px; font-size: 12px; display: none; }
+        .status.success { display: block; background: #064E3B; color: #34D399; }
+        .status.error { display: block; background: #7F1D1D; color: #F87171; }
+        .color-row { display: flex; gap: 6px; margin-top: 6px; }
+        .color-btn { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+        .color-btn.selected { border-color: white; }
+        .color-black { background: #1F2937; }
+        .color-white { background: #D1D5DB; }
+        .color-red { background: #EF4444; }
+        .color-green { background: #22C55E; }
+        .color-blue { background: #3B82F6; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="title">🔥 EMBER PROTOCOL</div>
+    <div class="subtitle">Assemble your mech. Connect your Agent. Begin survival.</div>
+
+    <div class="step">
+        <div class="step-title">① Character Name</div>
+        <input type="text" id="agentName" placeholder="Enter name..." maxlength="32" value="Echo">
+    </div>
+
+    <div class="step">
+        <div class="step-title">② Assemble Mech (Budget: 6 pts)</div>
+        <div class="budget" id="budgetDisplay">Budget: <span class="budget-ok">6 / 6</span></div>
+
+        <div style="margin-bottom:12px">
+            <div style="font-size:11px; color:var(--text2); margin-bottom:4px">Head → PER (Perception)</div>
+            <div class="part-group" data-part="head">
+                <div class="part-btn" data-tier="low" onclick="selectPart('head','low',1)"><span class="tier-val">1</span>Basic Lens</div>
+                <div class="part-btn selected" data-tier="mid" onclick="selectPart('head','mid',2)"><span class="tier-val">2</span>Standard Optics</div>
+                <div class="part-btn" data-tier="high" onclick="selectPart('head','high',3)"><span class="tier-val">3</span>Advanced Sensor</div>
+            </div>
+            <div class="color-row" data-color-part="head">
+                <div class="color-btn color-black selected" data-color="black" onclick="selectColor('head','black')"></div>
+                <div class="color-btn color-white" data-color="white" onclick="selectColor('head','white')"></div>
+                <div class="color-btn color-red" data-color="red" onclick="selectColor('head','red')"></div>
+                <div class="color-btn color-green" data-color="green" onclick="selectColor('head','green')"></div>
+                <div class="color-btn color-blue" data-color="blue" onclick="selectColor('head','blue')"></div>
+            </div>
+        </div>
+
+        <div style="margin-bottom:12px">
+            <div style="font-size:11px; color:var(--text2); margin-bottom:4px">Torso → CON (Constitution)</div>
+            <div class="part-group" data-part="torso">
+                <div class="part-btn" data-tier="low" onclick="selectPart('torso','low',1)"><span class="tier-val">1</span>Light Frame</div>
+                <div class="part-btn selected" data-tier="mid" onclick="selectPart('torso','mid',2)"><span class="tier-val">2</span>Standard Frame</div>
+                <div class="part-btn" data-tier="high" onclick="selectPart('torso','high',3)"><span class="tier-val">3</span>Heavy Armor</div>
+            </div>
+            <div class="color-row" data-color-part="torso">
+                <div class="color-btn color-black selected" data-color="black" onclick="selectColor('torso','black')"></div>
+                <div class="color-btn color-white" data-color="white" onclick="selectColor('torso','white')"></div>
+                <div class="color-btn color-red" data-color="red" onclick="selectColor('torso','red')"></div>
+                <div class="color-btn color-green" data-color="green" onclick="selectColor('torso','green')"></div>
+                <div class="color-btn color-blue" data-color="blue" onclick="selectColor('torso','blue')"></div>
+            </div>
+        </div>
+
+        <div>
+            <div style="font-size:11px; color:var(--text2); margin-bottom:4px">Locomotion → AGI (Agility)</div>
+            <div class="part-group" data-part="locomotion">
+                <div class="part-btn" data-tier="low" onclick="selectPart('locomotion','low',1)"><span class="tier-val">1</span>Basic Motor</div>
+                <div class="part-btn selected" data-tier="mid" onclick="selectPart('locomotion','mid',2)"><span class="tier-val">2</span>Standard Joint</div>
+                <div class="part-btn" data-tier="high" onclick="selectPart('locomotion','high',3)"><span class="tier-val">3</span>High-Speed Servo</div>
+            </div>
+            <div class="color-row" data-color-part="locomotion">
+                <div class="color-btn color-black selected" data-color="black" onclick="selectColor('locomotion','black')"></div>
+                <div class="color-btn color-white" data-color="white" onclick="selectColor('locomotion','white')"></div>
+                <div class="color-btn color-red" data-color="red" onclick="selectColor('locomotion','red')"></div>
+                <div class="color-btn color-green" data-color="green" onclick="selectColor('locomotion','green')"></div>
+                <div class="color-btn color-blue" data-color="blue" onclick="selectColor('locomotion','blue')"></div>
+            </div>
+        </div>
+
+        <div class="attr-display">
+            <div class="attr-item"><div class="attr-val" id="attrPer">2</div><div class="attr-label">PER</div></div>
+            <div class="attr-item"><div class="attr-val" id="attrCon">2</div><div class="attr-label">CON</div></div>
+            <div class="attr-item"><div class="attr-val" id="attrAgi">2</div><div class="attr-label">AGI</div></div>
+        </div>
+    </div>
+
+    <div class="step">
+        <div class="step-title">③ Connect Agent</div>
+        <input type="text" id="endpoint" placeholder="Agent API Endpoint (https://...)" value="">
+        <input type="password" id="apiKey" placeholder="API Key (sk-...)" value="">
+        <input type="text" id="modelInfo" placeholder="Model ID (optional)" value="">
+    </div>
+
+    <button class="submit-btn" id="submitBtn" onclick="register()">🚀 Start Game</button>
+    <div class="status" id="statusBox"></div>
+</div>
+
+<script>
+    const parts = { head: { tier: 'mid', cost: 2, color: 'black' }, torso: { tier: 'mid', cost: 2, color: 'black' }, locomotion: { tier: 'mid', cost: 2, color: 'black' } };
+
+    function selectPart(part, tier, cost) {
+        parts[part] = { ...parts[part], tier, cost };
+        document.querySelectorAll(`[data-part="${part}"] .part-btn`).forEach(b => b.classList.remove('selected'));
+        document.querySelector(`[data-part="${part}"] [data-tier="${tier}"]`).classList.add('selected');
+        updateBudget();
+    }
+
+    function selectColor(part, color) {
+        parts[part].color = color;
+        document.querySelectorAll(`[data-color-part="${part}"] .color-btn`).forEach(b => b.classList.remove('selected'));
+        document.querySelector(`[data-color-part="${part}"] [data-color="${color}"]`).classList.add('selected');
+    }
+
+    function updateBudget() {
+        const total = parts.head.cost + parts.torso.cost + parts.locomotion.cost;
+        document.getElementById('attrPer').textContent = parts.head.cost;
+        document.getElementById('attrCon').textContent = parts.torso.cost;
+        document.getElementById('attrAgi').textContent = parts.locomotion.cost;
+        const el = document.getElementById('budgetDisplay');
+        if (total <= 6) {
+            el.innerHTML = `Budget: <span class="budget-ok">${total} / 6</span>`;
+            document.getElementById('submitBtn').disabled = false;
+        } else {
+            el.innerHTML = `Budget: <span class="budget-over">${total} / 6 (OVER!)</span>`;
+            document.getElementById('submitBtn').disabled = true;
+        }
+    }
+
+    async function register() {
+        const name = document.getElementById('agentName').value.trim();
+        const endpoint = document.getElementById('endpoint').value.trim();
+        const apiKey = document.getElementById('apiKey').value.trim();
+        const modelInfo = document.getElementById('modelInfo').value.trim();
+        const statusBox = document.getElementById('statusBox');
+
+        if (!name || !endpoint || !apiKey) {
+            statusBox.className = 'status error';
+            statusBox.textContent = 'Please fill in all required fields.';
+            return;
+        }
+
+        statusBox.className = 'status';
+        statusBox.textContent = 'Testing connection...';
+        statusBox.style.display = 'block';
+        statusBox.style.background = '#1F2937';
+        statusBox.style.color = '#9CA3AF';
+
+        try {
+            const resp = await fetch('/api/v1/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_name: name,
+                    chassis: {
+                        head: { tier: parts.head.tier, color: parts.head.color },
+                        torso: { tier: parts.torso.tier, color: parts.torso.color },
+                        locomotion: { tier: parts.locomotion.tier, color: parts.locomotion.color },
+                    },
+                    agent_endpoint: endpoint,
+                    agent_api_key: apiKey,
+                    model_info: modelInfo,
+                }),
+            });
+
+            const data = await resp.json();
+
+            if (data.status === 'connected') {
+                statusBox.className = 'status success';
+                statusBox.innerHTML = `✅ Connected! Agent ID: <strong>${data.agent_id}</strong><br>Spawn: (${data.spawn_location.x}, ${data.spawn_location.y}) — ${data.spawn_location.zone}`;
+                localStorage.setItem('ember_token', data.token);
+                localStorage.setItem('ember_agent_id', data.agent_id);
+            } else {
+                statusBox.className = 'status error';
+                statusBox.textContent = `❌ Connection failed: ${data.connection_test?.error || 'Unknown error'}`;
+            }
+        } catch (e) {
+            statusBox.className = 'status error';
+            statusBox.textContent = `❌ Network error: ${e.message}`;
+        }
+    }
+</script>
+</body>
+</html>
