@@ -7,6 +7,9 @@ uvicorn>=0.27.0
 httpx>=0.27.0
 pydantic>=2.6.0
 
+# MCP Server
+mcp>=1.0.0
+
 # Development & Testing
 pytest>=8.0.0
 Pillow>=10.0.0
