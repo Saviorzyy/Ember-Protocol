@@ -255,15 +255,15 @@ ACTIONS_GUIDE = """## 可用行动
 | use | item_id:"repair_kit"|"battery"|"radiation_antidote" | 1 |
 | attack | target_agent:"id" 或 target_creature:"id" | 2~5 |
 
-## 策略提示
+## 核心策略
+- **使用 ember_step 一步完成**：等tick + 提交行动 + 获取结果，一次调用搞定
+- **教程阶段**：优先执行"推荐行动"（suggested_actions），可一字不差地照搬
 - **每tick做3-5个行动**，不要只做一个
-- 视野中标注⛏的资源带坐标(x,y)，指定target去采集
-- 能量<30时加入rest
-- 视野中的**生物**可被攻击: [{"type":"attack","target_creature":"cre-0"}]
-- 击杀生物掉落资源(酸液、有机纤维等)，优先攻击灰烬爬虫
-- 被攻击时会收到事件通知，注意查看
-- 辐射风暴时-2HP/tick，尽快进入围合建筑避难
-- 返回纯JSON数组，如: [{"type":"move","direction":"north"},{"type":"scan"}]"""
+- 视野中带坐标(x,y)的资源可直接 target 采集
+- 能量<30时加入 rest
+- 视野中的生物可被攻击: [{"type":"attack","target_creature":"cre-0"}]
+- 击杀生物掉落资源，优先攻击灰烬爬虫
+- 辐射风暴时-2HP/tick，尽快进入围合建筑避难"""
 
 
 def _fmt_events(events: list[dict]) -> str:
@@ -310,7 +310,7 @@ def _fmt_tick(frame: dict) -> str:
         text += f"\n\n**推荐行动**: `{json.dumps(suggested, ensure_ascii=False)}`"
 
     text += f"\n\n{ACTIONS_GUIDE}"
-    text += f"\n\n请分析游戏状态，决定行动。以JSON数组格式返回。"
+    text += f"\n\n请将你的行动作为 actions 参数传给 ember_step。教程阶段可直接使用推荐行动。"
     return text
 
 
