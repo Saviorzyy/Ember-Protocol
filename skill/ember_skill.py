@@ -105,6 +105,8 @@ class EmberSkill:
                 yield TickFrame(tick=current_tick, messages=frame.get("messages", []), raw=frame), send
             elif frame.get("type") == "ping":
                 await self.ws.send(json.dumps({"type": "pong", "ts": frame.get("ts")}))
+            elif frame.get("type") == "event":
+                print(json.dumps({"type": "event", **frame}), file=sys.stderr, flush=True)
 
     async def _recv(self) -> dict:
         return json.loads(await self.ws.recv())
@@ -198,7 +200,7 @@ async def run_with_llm(skill: EmberSkill):
     )
     model = os.environ.get("EMBER_SKILL_MODEL", "glm-5-turbo")
 
-    SYSTEM_PROMPT = """你是余烬星的机械体幸存者。每tick做3-5个行动。行动类型: move/chop/mine/rest/scan/inspect/craft/build/equip/radio_broadcast。返回纯JSON数组。"""
+    SYSTEM_PROMPT = """你是余烬星的机械体幸存者。每tick做3-5个行动。行动类型: move/chop/mine/rest/scan/inspect/craft/build/equip/attack/radio_broadcast。可攻击生物(target_creature:"cre-X")获取资源。返回纯JSON数组。"""
 
     history = []
     async for tick, send in skill.loop():

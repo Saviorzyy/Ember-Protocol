@@ -9,6 +9,8 @@ from .config import MAP_WIDTH as W, MAP_HEIGHT as H
 from .models import *
 from .terrain_gen import generate_terrain
 
+DIRS = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+
 
 class World:
     """Central world state - pure rule engine, no LLM calls."""
@@ -43,6 +45,9 @@ class World:
         self.broadcasts: list[dict] = []
         self.direct_messages: list[dict] = []
         self.talk_messages: list[dict] = []
+
+        # Tick notification queue for pushing events to agents
+        self.tick_notifications: dict[str, list[dict]] = defaultdict(list)
 
         # Action settlement
         self.collected_actions: dict[int, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
@@ -125,6 +130,40 @@ class World:
             stored=DROP_POD_EMERGENCY_CAPACITY,
             is_drop_pod=True,
         )
+
+        # Preset creatures near drop pod (C-5)
+        preset_count = random.randint(1, 2)
+        spawned = 0
+        for _ in range(20):
+            if spawned >= preset_count:
+                break
+            cx = spawn_pos.x + random.randint(-5, 5)
+            cy = spawn_pos.y + random.randint(-5, 5)
+            tile = self.get_tile(cx, cy)
+            if not tile:
+                continue
+            if tile.l1 not in (Terrain.FLAT, Terrain.SAND):
+                continue
+            if tile.l2_type == 'stone' and tile.stone_amount > 0:
+                continue
+            if tile.structure:
+                continue
+            if cx == spawn_pos.x and cy == spawn_pos.y:
+                continue
+            cid = f"cre-{self._next_creature_id}"
+            self._next_creature_id += 1
+            self.creatures[cid] = Creature(
+                creature_id=cid, creature_type="ash_crawler",
+                position=Position(cx, cy),
+                hp=CREATURES["ash_crawler"]["hp"],
+                max_hp=CREATURES["ash_crawler"]["hp"],
+                attack=CREATURES["ash_crawler"]["attack"],
+                range=CREATURES["ash_crawler"]["range"],
+                speed=CREATURES["ash_crawler"]["speed"],
+                behavior=CreatureBehavior.PASSIVE,
+                spawn_tick=self.tick_number,
+            )
+            spawned += 1
 
         self._log_event("agent_created", {"agent_id": agent_id, "name": agent_name, "pos": spawn_pos.to_tuple()})
         return agent
@@ -407,6 +446,16 @@ class World:
                 return pod_power.consume(amount)
         return False
 
+    # ── Shield Helper ──────────────────────────────
+    def _get_shielding_pod(self, x: int, y: int) -> Optional[str]:
+        """Return agent_id whose drop pod shield covers this position, or None."""
+        pos = Position(x, y)
+        for aid, agent in self.agents.items():
+            if agent.drop_pod_pos and agent.drop_pod_deployed:
+                if pos.dist(agent.drop_pod_pos) <= DROP_POD_SHIELD_RANGE:
+                    return aid
+        return None
+
     # ── Vicinity / View ───────────────────────────
     def get_vicinity(self, agent: AgentState) -> list[dict]:
         """Get visible tiles and entities for an agent."""
@@ -463,6 +512,15 @@ class World:
                     "status": other.status.value,
                 }})
 
+        # Creatures in view
+        for cid, creature in self.creatures.items():
+            d = agent.position.dist(creature.position)
+            if d <= view_range:
+                items.append({"x": creature.position.x, "y": creature.position.y, "creature": {
+                    "id": cid, "type": creature.creature_type,
+                    "hp": creature.hp, "max_hp": creature.max_hp,
+                }})
+
         return items
 
     def _ore_name(self, ore_type: str) -> str:
@@ -489,6 +547,7 @@ class World:
         self.broadcasts.clear()
         self.direct_messages.clear()
         self.talk_messages.clear()
+        self.tick_notifications.clear()
 
     def settle_actions(self, tick: int, actions_by_agent: dict[str, list[dict]]) -> dict[str, list[dict]]:
         """Settle all actions for a tick. Returns results per agent."""
@@ -571,6 +630,12 @@ class World:
         if agent.energy < ENERGY_MOVE:
             return {"type": "move", "success": False, "error_code": "INSUFFICIENT_ENERGY", "detail": "能量不足"}
 
+        # D-2: Shield blocks other agents from entering
+        shielding_pod = self._get_shielding_pod(nx, ny)
+        if shielding_pod and shielding_pod != agent.agent_id:
+            return {"type": "move", "success": False, "error_code": "BLOCKED",
+                    "detail": "降落仓护盾范围内不可进入"}
+
         agent.energy -= ENERGY_MOVE
         old_pos = (agent.position.x, agent.position.y)
         agent.position = Position(nx, ny)
@@ -650,7 +715,6 @@ class World:
         # Stone depleted?
         if tile.stone_amount <= 0:
             tile.l2_type = ''
-            tile.l1 = Terrain.ROCK if random.random() < 0.35 else Terrain.FLAT
             # Rubble chance
             if random.random() < 0.20:
                 tile.veg_type = 'rubble'
@@ -822,10 +886,31 @@ class World:
         return {"type": "radio_scan", "success": True, "detail": f"扫描到 {len(nearby)} 个在线智能体", "agents": nearby}
 
     def _do_attack(self, agent: AgentState, action: dict) -> dict:
+        # Check for creature target
+        target_creature_id = action.get("target_creature")
+        if target_creature_id:
+            return self._do_attack_creature(agent, action, target_creature_id)
+
         target_id = action.get("target_agent", "")
         target = self.agents.get(target_id)
         if not target:
             return {"type": "attack", "success": False, "error_code": "AGENT_NOT_FOUND", "detail": "目标不存在"}
+
+        # D-3/D-4: Shield boundary checks — block PvP attacks across shield lines
+        for aid, other in self.agents.items():
+            if not other.drop_pod_pos or not other.drop_pod_deployed:
+                continue
+            pod_pos = other.drop_pod_pos
+            attacker_in = agent.position.dist(pod_pos) <= DROP_POD_SHIELD_RANGE
+            target_in = target.position.dist(pod_pos) <= DROP_POD_SHIELD_RANGE
+            if attacker_in and not target_in:
+                # D-3: Attacker inside shield, target outside — block
+                return {"type": "attack", "success": False, "error_code": "SHIELD_BLOCK",
+                        "detail": "护盾范围内不可向外攻击"}
+            if not attacker_in and target_in:
+                # D-4: Target inside shield, attacker outside — block
+                return {"type": "attack", "success": False, "error_code": "SHIELD_BLOCK",
+                        "detail": "目标在降落仓护盾保护内"}
 
         weapon = self.get_held_weapon(agent)
         if weapon:
@@ -882,6 +967,15 @@ class World:
 
         target.health -= final_dmg
 
+        # B-1: Notify target of attack
+        self.tick_notifications[target_id].append({
+            "type": "attacked", "attacker_id": agent.agent_id,
+            "attacker_name": agent.agent_name, "damage": final_dmg,
+            "hp_remaining": max(0, target.health),
+        })
+        # R-1: Interrupt target's crafting
+        self._interrupt_crafting(target)
+
         if weapon and weapon.get("id"):
             self._reduce_durability(agent, weapon["id"])
         # Armor durability
@@ -897,6 +991,80 @@ class World:
 
         return result
 
+    def _do_attack_creature(self, agent: AgentState, action: dict, creature_id: str) -> dict:
+        """Attack a creature target."""
+        creature = self.creatures.get(creature_id)
+        if not creature:
+            return {"type": "attack", "success": False, "error_code": "TARGET_NOT_FOUND", "detail": "目标生物不存在"}
+
+        weapon = self.get_held_weapon(agent)
+        if weapon:
+            damage = weapon["damage"]
+            wp_range = weapon["range"]
+            energy_cost = ENERGY_ATTACK_MELEE if weapon["type"] == "melee" else weapon.get("energy", 3)
+        else:
+            damage = UNARMED_DAMAGE
+            wp_range = 1
+            energy_cost = ENERGY_ATTACK_MELEE
+
+        d = agent.position.dist(creature.position)
+        if d > wp_range:
+            return {"type": "attack", "success": False, "error_code": "OUT_OF_RANGE",
+                    "detail": f"生物距离{d}格超出武器射程{wp_range}"}
+        if agent.energy < energy_cost:
+            return {"type": "attack", "success": False, "error_code": "INSUFFICIENT_ENERGY", "detail": "能量不足"}
+
+        agent.energy -= energy_cost
+
+        # Creatures don't dodge — always hit
+        agi_mod = 1.0 + agent.agility * 0.05
+        final_dmg = max(1, int(damage * agi_mod))
+
+        creature.hp -= final_dmg
+        # Add attacker to aggro list
+        if agent.agent_id not in creature.aggro_list:
+            creature.aggro_list.append(agent.agent_id)
+        creature.last_attacked_tick = self.tick_number
+
+        if weapon and weapon.get("id"):
+            self._reduce_durability(agent, weapon["id"])
+
+        result = {"type": "attack", "success": True, "hit": True, "damage_dealt": final_dmg,
+                  "target_type": "creature", "target_creature_type": creature.creature_type,
+                  "target_hp": max(0, creature.hp),
+                  "detail": f"攻击 {creature.creature_type} 造成 {final_dmg} 点伤害"}
+
+        if creature.hp <= 0:
+            self._handle_creature_death(agent, creature)
+            result["target_killed"] = True
+            result["drops"] = result.get("drops", [])
+
+        return result
+
+    def _handle_creature_death(self, killer: AgentState, creature: Creature):
+        """Handle creature death — drops and cleanup."""
+        drops = CREATURE_DROPS.get(creature.creature_type, {})
+        # Primary drop (always)
+        primary = drops.get("primary")
+        if primary:
+            item_id, min_amt, max_amt, _ = primary
+            amount = random.randint(min_amt, max_amt)
+            self._add_ground_item(creature.position.x, creature.position.y, item_id, amount)
+        # Secondary drop (probability)
+        secondary = drops.get("secondary")
+        if secondary:
+            item_id, min_amt, max_amt, prob = secondary
+            if random.random() < prob:
+                amount = random.randint(min_amt, max_amt)
+                self._add_ground_item(creature.position.x, creature.position.y, item_id, amount)
+
+        killer.creature_kills += 1
+        self._log_event("creature_killed", {
+            "creature_id": creature.creature_id, "creature_type": creature.creature_type,
+            "killer": killer.agent_id,
+        })
+        del self.creatures[creature.creature_id]
+
     def _do_equip(self, agent: AgentState, action: dict) -> dict:
         item_id = action.get("item_id", "")
         if not self.has_item(agent, item_id, 1):
@@ -905,14 +1073,31 @@ class World:
         if slot not in ("main_hand", "off_hand", "armor"):
             return {"type": "equip", "success": False, "error_code": "INVALID_TARGET", "detail": "无效装备槽"}
 
-        # Unequip current
+        # Return currently equipped item to inventory (with durability)
         current = getattr(agent.equipment, slot)
         if current:
+            dur = getattr(agent.equipment, f"{slot}_durability")
             self.add_item(agent, current, 1)
+            # Set durability on the returned item
+            if dur is not None:
+                for inv in agent.inventory:
+                    if inv.item_id == current and inv.durability is None:
+                        inv.durability = dur
+                        break
+            setattr(agent.equipment, f"{slot}_durability", None)
 
-        # Equip new
+        # Equip new item
         self.remove_item(agent, item_id, 1)
         setattr(agent.equipment, slot, item_id)
+
+        # Set durability on equipment slot
+        max_dur = None
+        if item_id in TOOLS: max_dur = TOOLS[item_id]["durability"]
+        elif item_id in WEAPONS: max_dur = WEAPONS[item_id]["durability"]
+        elif item_id in ARMORS: max_dur = ARMORS[item_id]["durability"]
+        elif item_id in ACCESSORIES: max_dur = ACCESSORIES[item_id]["durability"]
+        setattr(agent.equipment, f"{slot}_durability", max_dur)
+
         return {"type": "equip", "success": True, "detail": f"已装备 {item_id}"}
 
     def _do_unequip(self, agent: AgentState, action: dict) -> dict:
@@ -922,8 +1107,16 @@ class World:
         current = getattr(agent.equipment, slot)
         if not current:
             return {"type": "unequip", "success": False, "error_code": "INVALID_TARGET", "detail": "该槽位无装备"}
+        dur = getattr(agent.equipment, f"{slot}_durability")
         self.add_item(agent, current, 1)
+        # Set durability on the returned item
+        if dur is not None:
+            for inv in agent.inventory:
+                if inv.item_id == current and inv.durability is None:
+                    inv.durability = dur
+                    break
         setattr(agent.equipment, slot, None)
+        setattr(agent.equipment, f"{slot}_durability", None)
         return {"type": "unequip", "success": True, "detail": f"已卸下 {current}"}
 
     def _do_use(self, agent: AgentState, action: dict) -> dict:
@@ -1185,21 +1378,29 @@ class World:
         return d
 
     def _reduce_durability(self, agent: AgentState, item_id: str):
-        """Reduce durability of held/worn item. Destroy if depleted."""
-        targets = [("main_hand", agent.equipment.main_hand), ("off_hand", agent.equipment.off_hand),
-                   ("armor", agent.equipment.armor)]
-        for slot, equipped_id in targets:
+        """Reduce durability of equipped item. Destroy if depleted."""
+        for slot in ("main_hand", "off_hand", "armor"):
+            equipped_id = getattr(agent.equipment, slot)
             if equipped_id == item_id:
-                for inv in agent.inventory:
-                    if inv.item_id == item_id and inv.durability is not None:
-                        inv.durability -= 1
-                        if inv.durability <= 0:
-                            agent.inventory.remove(inv)
-                            setattr(agent.equipment, slot, None)
-                        return
-                # Durability tracked on equipment slot
-                setattr(agent.equipment, slot, None)
+                dur_attr = f"{slot}_durability"
+                dur = getattr(agent.equipment, dur_attr)
+                if dur is not None:
+                    dur -= 1
+                    setattr(agent.equipment, dur_attr, dur)
+                    if dur <= 0:
+                        setattr(agent.equipment, slot, None)
+                        setattr(agent.equipment, dur_attr, None)
+                        self._log_event("item_broken", {"agent_id": agent.agent_id, "item": item_id, "slot": slot})
                 return
+
+    def _interrupt_crafting(self, agent: AgentState):
+        """Interrupt agent's crafting, reset status. Materials stay in inventory (consumed on completion)."""
+        if agent.status != ActionStatus.CRAFTING:
+            return
+        agent.status = ActionStatus.IDLE
+        agent.action_data = {}
+        agent.action_remaining = 0
+        self._log_event("craft_interrupted", {"agent_id": agent.agent_id})
 
     def _handle_death(self, agent: AgentState):
         """Handle agent death - drop items, consume backup body."""
@@ -1259,17 +1460,68 @@ class World:
             if not self.weather_warning_sent:
                 self.weather_warning_sent = True
                 self._log_event("weather_warning", {"weather": "radiation_storm", "in_ticks": STORM_WARNING_TICKS})
+                for aid, a in self.agents.items():
+                    if a.online:
+                        self.tick_notifications[aid].append({"type": "weather_warning", "weather": "radiation_storm", "in_ticks": STORM_WARNING_TICKS})
             else:
                 self.weather = Weather.RADIATION_STORM
                 self.weather_remaining = STORM_DURATION
                 self.weather_warning_sent = False
                 self.storm_cooldown = random.randint(STORM_INTERVAL_MIN, STORM_INTERVAL_MAX)
                 self._log_change("weather_change", from_weather="calm", to_weather="radiation_storm", duration=STORM_DURATION)
+                for aid, a in self.agents.items():
+                    if a.online:
+                        self.tick_notifications[aid].append({"type": "storm_start", "weather": "radiation_storm", "duration": STORM_DURATION})
+
+        # Radiation damage (area radiation S-1 + storm damage S-2, enclosure immunity S-4)
+        for agent in list(self.agents.values()):
+            if not agent.online or agent.is_dead():
+                continue
+            # Enclosure immunity
+            if self.is_in_enclosure(agent.position.x, agent.position.y):
+                continue
+
+            # S-1: Area radiation — probability increases with distance from center
+            w = abs(agent.position.y - CENTER_Y) / max(1, CENTER_Y)
+            rad_prob = 0.30 * w  # lerp(0, 0.30, w)
+            if random.random() < rad_prob:
+                dmg = RADIATION_DAMAGE
+                armor_id = agent.equipment.armor
+                resist = ARMORS.get(armor_id, {}).get("radiation_resist", 0) if armor_id else 0
+                dmg = max(1, int(dmg * (1 - resist)))
+                agent.health -= dmg
+                agent.radiation_debuff = True
+                self._log_event("radiation_damage", {"agent_id": agent.agent_id, "damage": dmg})
+                if agent.health <= 0:
+                    self._handle_death(agent)
+                    continue
+
+            # S-2: Radiation storm damage
+            if self.weather == Weather.RADIATION_STORM:
+                dmg = STORM_DAMAGE
+                armor_id = agent.equipment.armor
+                resist = ARMORS.get(armor_id, {}).get("radiation_resist", 0) if armor_id else 0
+                dmg = max(1, int(dmg * (1 - resist)))
+                agent.health -= dmg
+                self._log_event("storm_damage", {"agent_id": agent.agent_id, "damage": dmg})
+                if agent.health <= 0:
+                    self._handle_death(agent)
 
         # Solar energy recovery for all agents
         for agent in self.agents.values():
             if agent.online and not agent.is_dead():
                 agent.energy = min(agent.max_energy, agent.energy + ENERGY_RECOVER_SOLAR)
+
+        # Power Node wireless charging (E-1)
+        for pn_id, pn in self.power_nodes.items():
+            if pn.is_drop_pod or pn.stored <= 0:
+                continue
+            # Find agents within POWER_NODE_RANGE
+            for agent in self.agents.values():
+                if not agent.online or agent.is_dead():
+                    continue
+                if agent.position.dist(pn.position) <= POWER_NODE_RANGE:
+                    agent.energy = min(agent.max_energy, agent.energy + ENERGY_RECOVER_POWER_NODE)
 
         # Power node recharge (drop pod solar)
         for pn_id, pn in self.power_nodes.items():
@@ -1333,6 +1585,106 @@ class World:
             del self.ground_items[key]
 
     def _advance_creatures(self):
-        """Passive creature AI advancement."""
-        # TODO: Full creature AI with spawning and aggro
-        pass
+        """Creature spawning and AI advancement."""
+        # --- Spawning ---
+        from collections import Counter
+        pop_counts = Counter(c.creature_type for c in self.creatures.values())
+        for ctype, cconfig in CREATURES.items():
+            if pop_counts.get(ctype, 0) >= CREATURE_POP_CAP.get(ctype, 10):
+                continue
+            if random.random() >= CREATURE_SPAWN_PROB:
+                continue
+            # Find valid spawn position
+            habitat = cconfig.get("habitat", ["flat"])
+            for _ in range(20):
+                x = random.randint(10, MAP_WIDTH - 10)
+                y = random.randint(10, MAP_HEIGHT - 10)
+                tile = self.get_tile(x, y)
+                if not tile:
+                    continue
+                if tile.l1.value not in habitat:
+                    continue
+                if tile.l1 in (Terrain.WATER, Terrain.TRENCH):
+                    continue
+                if tile.l2_type == 'stone' and tile.stone_amount > 0:
+                    continue
+                if tile.structure:
+                    continue
+                # Don't spawn on agent positions
+                on_agent = any(a.position == Position(x, y) for a in self.agents.values())
+                if on_agent:
+                    continue
+                cid = f"cre-{self._next_creature_id}"
+                self._next_creature_id += 1
+                creature = Creature(
+                    creature_id=cid, creature_type=ctype,
+                    position=Position(x, y),
+                    hp=cconfig["hp"], max_hp=cconfig["hp"],
+                    attack=cconfig["attack"], range=cconfig["range"],
+                    speed=cconfig["speed"],
+                    behavior=CreatureBehavior(cconfig.get("behavior", "passive")),
+                    spawn_tick=self.tick_number,
+                )
+                self.creatures[cid] = creature
+                self._log_event("creature_spawned", {"creature_id": cid, "type": ctype, "pos": (x, y)})
+                break
+
+        # --- AI ---
+        for creature in list(self.creatures.values()):
+            # Aggro decay
+            if creature.aggro_list and (self.tick_number - creature.last_attacked_tick) > CREATURE_NEUTRAL_TICKS:
+                creature.aggro_list.clear()
+
+            if not creature.aggro_list:
+                continue
+
+            # Process first valid aggro target
+            target_agent = None
+            for aid in creature.aggro_list:
+                agent = self.agents.get(aid)
+                if agent and not agent.is_dead():
+                    target_agent = agent
+                    break
+            if not target_agent:
+                creature.aggro_list.clear()
+                continue
+
+            dist = creature.position.dist(target_agent.position)
+
+            # Attack if in range
+            if dist <= creature.range:
+                # Armor reduction
+                armor_id = target_agent.equipment.armor
+                armor_def = ARMORS.get(armor_id, {}).get("defense", 0) if armor_id else 0
+                damage = max(1, creature.attack - armor_def)
+                target_agent.health -= damage
+                self.tick_notifications[target_agent.agent_id].append({
+                    "type": "attacked", "attacker_type": "creature",
+                    "creature_type": creature.creature_type, "damage": damage,
+                    "hp_remaining": max(0, target_agent.health),
+                })
+                self._interrupt_crafting(target_agent)
+                self._log_event("creature_attack", {
+                    "creature_id": creature.creature_id, "creature_type": creature.creature_type,
+                    "target": target_agent.agent_id, "damage": damage,
+                    "target_hp": max(0, target_agent.health),
+                })
+                if target_agent.health <= 0:
+                    self._handle_death(target_agent)
+                continue
+
+            # Move toward target
+            if dist <= 5:  # Only chase within reasonable range
+                dx = 1 if target_agent.position.x > creature.position.x else (-1 if target_agent.position.x < creature.position.x else 0)
+                dy = 1 if target_agent.position.y > creature.position.y else (-1 if target_agent.position.y < creature.position.y else 0)
+                # Try horizontal first, then vertical
+                moved = False
+                for mx, my in [(dx, 0), (0, dy), (dx, dy)]:
+                    if mx == 0 and my == 0:
+                        continue
+                    nx, ny = creature.position.x + mx, creature.position.y + my
+                    tile = self.get_tile(nx, ny)
+                    if tile and tile.passable:
+                        creature.position = Position(nx, ny)
+                        moved = True
+                        break

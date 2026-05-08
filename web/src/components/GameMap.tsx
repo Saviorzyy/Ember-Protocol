@@ -15,7 +15,7 @@ interface GameMapProps {
 
 interface HoverInfo {
   x: number; y: number; screenX: number; screenY: number
-  tile: any; agents: Agent[]
+  tile: any; agents: Agent[]; creatures: any[]
 }
 
 const TERRAIN_COLORS: Record<string, string> = {
@@ -44,6 +44,12 @@ const STRUCT_COLORS: Record<string, string> = {
 }
 const STRUCT_LABELS: Record<string, string> = {
   wall: '墙壁', door: '门', workbench: '工作台', furnace: '熔炉', power_node: '能源节点',
+}
+const CREATURE_COLORS: Record<string, string> = {
+  ash_crawler: '#d27d2d', rock_spider: '#b8a090', dryad_ape: '#50c83c', swamp_worm: '#7a4aaa',
+}
+const CREATURE_LABELS: Record<string, string> = {
+  ash_crawler: '灰烬爬虫', rock_spider: '岩石蛛', dryad_ape: '树猿', swamp_worm: '沼泽虫',
 }
 
 export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent }: GameMapProps) {
@@ -131,6 +137,39 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent 
         ctx.strokeStyle = 'rgba(255,255,255,0.3)'
         ctx.lineWidth = 0.5
         ctx.strokeRect(spx, spy, tileSize * 2, tileSize * 2)
+      }
+    }
+
+    // Draw creatures as diamonds
+    if (mapData?.creatures) {
+      for (const creature of mapData.creatures) {
+        const cpx = ox + creature.x * tileSize
+        const cpy = oy + creature.y * tileSize
+        if (cpx + tileSize < 0 || cpx > canvas.width || cpy + tileSize < 0 || cpy > canvas.height) continue
+
+        const color = CREATURE_COLORS[creature.type] || '#f0f'
+        const r = Math.max(tileSize * 0.8, 2)
+        const cx = cpx + tileSize / 2
+        const cy = cpy + tileSize / 2
+
+        ctx.beginPath()
+        ctx.moveTo(cx, cy - r)
+        ctx.lineTo(cx + r, cy)
+        ctx.lineTo(cx, cy + r)
+        ctx.lineTo(cx - r, cy)
+        ctx.closePath()
+        ctx.fillStyle = color
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)'
+        ctx.lineWidth = 0.5
+        ctx.stroke()
+
+        // HP bar
+        if (creature.hp < creature.max_hp) {
+          const hpPct = creature.hp / creature.max_hp
+          ctx.fillStyle = hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00'
+          ctx.fillRect(cpx, cpy - 4, tileSize * hpPct, 2)
+        }
       }
     }
 
@@ -224,7 +263,10 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent 
       const [ax, ay] = a.position
       return Math.abs(ax - worldX) <= 1 && Math.abs(ay - worldY) <= 1 && a.online
     })
-    setHover({ x: worldX, y: worldY, screenX: e.clientX, screenY: e.clientY, tile, agents: agentsHere })
+    const creaturesHere = (mapData?.creatures || []).filter((c: any) => {
+      return Math.abs(c.x - worldX) <= 1 && Math.abs(c.y - worldY) <= 1
+    })
+    setHover({ x: worldX, y: worldY, screenX: e.clientX, screenY: e.clientY, tile, agents: agentsHere, creatures: creaturesHere })
   }, [dragging, dragStart, screenToWorld, mapData, agents])
 
   const handleMouseUp = useCallback(() => { setDragging(false) }, [])
@@ -311,6 +353,17 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent 
           {hover.agents.length > 0 && (
             <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #2a3040' }}>
               {hover.agents.map(a => <div key={a.agent_id} style={{ color: '#0099ff', fontSize: 10 }}>👤 {a.name} HP:{a.health}</div>)}
+            </div>
+          )}
+          {hover.creatures.length > 0 && (
+            <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid #2a3040' }}>
+              {hover.creatures.map((c: any) => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10 }}>
+                  <span style={{ width: 8, height: 8, background: CREATURE_COLORS[c.type] || '#f0f', display: 'inline-block', transform: 'rotate(45deg)', transformOrigin: 'center' }} />
+                  <span style={{ color: CREATURE_COLORS[c.type] || '#f0f' }}>{CREATURE_LABELS[c.type] || c.type}</span>
+                  <span style={{ color: '#888' }}>HP:{c.hp}/{c.max_hp}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>

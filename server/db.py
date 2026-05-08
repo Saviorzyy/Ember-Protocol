@@ -39,6 +39,13 @@ def init_db(path: str):
         );
         CREATE INDEX IF NOT EXISTS idx_action_log_tick ON action_log(tick);
         CREATE INDEX IF NOT EXISTS idx_action_log_agent ON action_log(agent_id);
+        CREATE TABLE IF NOT EXISTS wal_log (
+            tick INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            change_type TEXT NOT NULL,
+            change_data TEXT NOT NULL,
+            PRIMARY KEY (tick, seq)
+        );
     """)
     conn.commit()
     conn.close()
@@ -84,5 +91,37 @@ def log_action(tick: int, agent_id: str, action_type: str, action_data: dict, re
     conn = get_conn()
     conn.execute("INSERT INTO action_log (tick, agent_id, action_type, action_data, result, timestamp) VALUES (?,?,?,?,?,?)",
                  (tick, agent_id, action_type, json.dumps(action_data), json.dumps(result), time.time()))
+    conn.commit()
+    conn.close()
+
+
+# ── P-1: WAL (Write-Ahead Log) ──────────────────
+def write_wal_entries(tick: int, changes: list[dict]):
+    """Write per-tick WAL entries."""
+    conn = get_conn()
+    for seq, change in enumerate(changes):
+        conn.execute(
+            "INSERT INTO wal_log (tick, seq, change_type, change_data) VALUES (?,?,?,?)",
+            (tick, seq, change.get("type", ""), json.dumps(change))
+        )
+    conn.commit()
+    conn.close()
+
+
+def read_wal_after(tick: int) -> list[dict]:
+    """Read WAL entries after specified tick."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT change_type, change_data FROM wal_log WHERE tick > ? ORDER BY tick, seq",
+        (tick,)
+    ).fetchall()
+    conn.close()
+    return [{"type": r[0], **json.loads(r[1])} for r in rows]
+
+
+def truncate_wal(before_tick: int):
+    """Remove WAL entries before specified tick (after snapshot confirmed)."""
+    conn = get_conn()
+    conn.execute("DELETE FROM wal_log WHERE tick < ?", (before_tick,))
     conn.commit()
     conn.close()

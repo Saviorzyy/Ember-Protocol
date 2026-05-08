@@ -62,10 +62,23 @@ class GameClient:
         self._state = {}
 
     async def connect(self) -> dict:
-        self.ws = await websockets.connect(f"{self.url}/ws/game?token={self.token}")
+        try:
+            self.ws = await websockets.connect(f"{self.url}/ws/game?token={self.token}")
+        except websockets.InvalidURI as e:
+            raise RuntimeError(f"无法连接到游戏服务器 {self.url} — 请确认服务器已启动") from e
+        except OSError as e:
+            raise RuntimeError(f"连接被拒绝 {self.url} — 请确认服务器已启动 (python3 -m server.main)") from e
+
         session = json.loads(await self.ws.recv())
+        if session.get("type") == "error":
+            code = session.get("error_code", "")
+            detail = session.get("detail", "")
+            if code == "UNAUTHORIZED":
+                raise RuntimeError(f"Token 无效或已过期。请重新注册角色并更新 MCP 配置中的 token。\n  注册: python3 ember_mcp_server.py --register")
+            raise RuntimeError(f"认证失败: {code} — {detail}")
         if session.get("type") != "session":
             raise RuntimeError(f"Expected session, got {session.get('type')}")
+
         self.agent_id = session["agent_id"]
         self.agent_name = session["agent_name"]
         self._state = session.get("state", {})
@@ -137,12 +150,17 @@ ACTIONS_GUIDE = """## 可用行动
 | radio_scan | — | 1 |
 | talk | target_agent, content | 0 |
 | use | item_id:"repair_kit"\|"battery"\|"radiation_antidote" | 1 |
+| attack | target_agent:"id" 或 target_creature:"id" | 2~5 |
 
 ## 策略提示
 - **每tick做3-5个行动**，不要只做一个
 - 视野中标注⛏的资源带坐标(x,y)，指定target去采集
 - 教程Phase 0: inspect(inventory)一次进入自由模式
 - 能量<30时加入rest
+- 视野中的**生物**可被攻击: [{"type":"attack","target_creature":"cre-0"}]
+- 击杀生物掉落资源(酸液、有机纤维等)，优先攻击灰烬爬虫
+- 被攻击时会收到事件通知，注意查看
+- 辐射风暴时-2HP/tick，尽快进入围合建筑避难
 - 返回纯JSON数组，如: [{"type":"move","direction":"north"},{"type":"scan"}]"""
 
 
@@ -195,6 +213,14 @@ def _fmt_result(frame: dict) -> str:
         if r.get("type") == "radio_scan" and r.get("agents"):
             for a in r["agents"]:
                 lines.append(f"  👤 {a.get('name','?')} 距离{a.get('distance','?')}格")
+
+        # Show creature attack results
+        if r.get("type") == "attack" and r.get("target_type") == "creature":
+            ct = r.get("target_creature_type", "未知")
+            if r.get("target_killed"):
+                lines.append(f"  💀 **击杀 {ct}**!")
+            else:
+                lines.append(f"  🐛 攻击 {ct}: HP {r.get('target_hp', '?')}")
 
         # Show missing materials
         if r.get("missing"):
@@ -262,7 +288,32 @@ def create_mcp_server(game: GameClient) -> Server:
     async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         if name == "ember_tick":
             frame = await game.wait_tick()
-            return [types.TextContent(type="text", text=_fmt_tick(frame))]
+            text = _fmt_tick(frame)
+            # Flush pending event notifications
+            events = []
+            while not game._event_q.empty():
+                try:
+                    evt = game._event_q.get_nowait()
+                    events.append(evt)
+                except asyncio.QueueEmpty:
+                    break
+            if events:
+                text += "\n\n## ⚡ 事件通知"
+                for evt in events:
+                    et = evt.get("type", "event")
+                    data = evt.get("data", evt)
+                    if et == "attacked":
+                        if data.get("attacker_type") == "creature":
+                            text += f"\n- ⚔️ **被攻击**: {data.get('creature_type', '未知生物')} 造成 {data.get('damage', '?')} 伤害 (HP:{data.get('hp_remaining', '?')})"
+                        else:
+                            text += f"\n- ⚔️ **被攻击**: {data.get('attacker_name', '未知')} 造成 {data.get('damage', '?')} 伤害 (HP:{data.get('hp_remaining', '?')})"
+                    elif et == "weather_warning":
+                        text += f"\n- 🌩️ **天气预警**: 辐射风暴将在 {data.get('in_ticks', '?')} tick 后到达！"
+                    elif et == "storm_start":
+                        text += f"\n- ☢️ **辐射风暴开始**: 持续 {data.get('duration', '?')} tick，暴露者-2HP/tick，进入建筑避难！"
+                    else:
+                        text += f"\n- 📢 {et}: {json.dumps(data, ensure_ascii=False)[:100]}"
+            return [types.TextContent(type="text", text=text)]
 
         elif name == "ember_act":
             tick = arguments.get("tick", game.tick_number)

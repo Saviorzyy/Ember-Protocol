@@ -1,10 +1,9 @@
 __pycache__/
 *.pyc
-*.pyo
 .DS_Store
+data/*.db
+output/
+.pytest_cache/
 node_modules/
-dist/
-data/
-*.db
-.env
-*.log
+web/dist/
+*.egg-info/

@@ -4,6 +4,24 @@ from aiohttp import web
 from .world import World
 from .auth import register_agent
 import json
+import time
+
+
+# ── A-1: Registration Rate Limiting ─────────────
+_registration_attempts: dict[str, list[float]] = {}  # ip -> [timestamps]
+
+
+def _check_rate_limit(ip: str, max_attempts: int = 5, window: float = 60.0) -> bool:
+    """Check if IP has exceeded registration rate limit. Returns True if allowed."""
+    now = time.time()
+    attempts = _registration_attempts.get(ip, [])
+    # Remove old attempts outside window
+    attempts = [t for t in attempts if now - t < window]
+    _registration_attempts[ip] = attempts
+    if len(attempts) >= max_attempts:
+        return False
+    attempts.append(now)
+    return True
 
 
 async def handle_register(request: web.Request) -> web.Response:
@@ -13,6 +31,11 @@ async def handle_register(request: web.Request) -> web.Response:
         body = await request.json()
     except json.JSONDecodeError:
         return web.json_response({"error": "无效的 JSON"}, status=400)
+
+    # A-1: Rate limit check
+    ip = request.remote or request.headers.get("X-Forwarded-For", "unknown")
+    if not _check_rate_limit(ip):
+        return web.json_response({"error": "注册过于频繁，请1分钟后重试"}, status=429)
 
     agent_name = body.get("agent_name", "").strip()
     if not agent_name or len(agent_name) > 32:
@@ -104,10 +127,23 @@ async def handle_map_data(request: web.Request) -> web.Response:
                 "shield_range": 3,
             })
 
+    # Collect creature positions
+    creatures_list = []
+    for cid, creature in world.creatures.items():
+        creatures_list.append({
+            "id": cid,
+            "type": creature.creature_type,
+            "x": creature.position.x,
+            "y": creature.position.y,
+            "hp": creature.hp,
+            "max_hp": creature.max_hp,
+        })
+
     return web.json_response({
         "tiles": tiles, "width": 100, "height": 100,
         "structures": structures,
         "drop_pods": drop_pods,
+        "creatures": creatures_list,
     })
 
 

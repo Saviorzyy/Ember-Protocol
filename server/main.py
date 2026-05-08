@@ -11,7 +11,7 @@ import aiohttp_cors
 from .world import World
 from .ws_handler import WSManager
 from .http_routes import handle_register, handle_status, handle_map_data, handle_agents_list, handle_agent_detail, handle_actions_log, handle_events
-from .db import init_db, save_snapshot
+from .db import init_db, save_snapshot, load_latest_snapshot, read_wal_after
 from .config import MAP_SEED, TICK_INTERVAL, TICK_CADENCE, HEARTBEAT_INTERVAL, HEARTBEAT_MAX_MISS
 
 
@@ -28,6 +28,13 @@ class GameServer:
         os.makedirs(data_dir, exist_ok=True)
         db_path = os.path.join(data_dir, "ember.db")
         init_db(db_path)
+
+        # P-5: Load latest snapshot on startup for crash recovery
+        snapshot = load_latest_snapshot()
+        if snapshot:
+            tick, data = snapshot
+            self._tick = tick + 1
+            print(f"Loaded snapshot from tick {tick}")
 
         # Register token hashes from DB
         for agent_id in list(self.world.agents.keys()):
@@ -107,6 +114,16 @@ class GameServer:
             # Actions are now settled immediately in ws_handler
             # Just advance the world state
             self.world.advance_world()
+
+            # P-1: Write WAL entries for this tick
+            if self.world.changes:
+                from .db import write_wal_entries
+                write_wal_entries(self._tick, self.world.changes)
+
+            # Flush tick notifications to connected agents
+            for aid, notifs in list(self.world.tick_notifications.items()):
+                for notif in notifs:
+                    await self.ws_manager.send_event(aid, notif.get("type", "event"), notif)
 
             # Maintain cadence
             elapsed = time.monotonic() - tick_start
@@ -286,6 +303,15 @@ class GameServer:
                     other_held = other.equipment.main_hand or "空手"
                     agents_seen.append(f"{other.agent_name}({other.position.x},{other.position.y} 手持:{other_held} HP:{other.health})")
 
+        # Creatures in view
+        creatures_seen = []
+        for cid, creature in world.creatures.items():
+            d = agent.position.dist(creature.position)
+            if d <= view_range:
+                creatures_seen.append(f"{creature.creature_type}({creature.position.x},{creature.position.y} HP:{creature.hp}/{creature.max_hp})")
+        if creatures_seen:
+            lines.append(f"  生物: {', '.join(creatures_seen)}")
+
         lines.append(f"\n【视野】{world.day_phase.value}{' 视野'+str(view_range)+'格'}")
         if terrain_seen:
             # Prioritize: show actionable resources first
@@ -346,13 +372,15 @@ class GameServer:
         return "\n".join(lines)
 
     async def _heartbeat_loop(self):
-        """Periodic heartbeat check."""
+        """W-5: Periodic heartbeat check."""
         while self._running:
             await asyncio.sleep(HEARTBEAT_INTERVAL)
-            # Heartbeats are handled at the WebSocket level by aiohttp
+            await self.ws_manager.check_heartbeats()
+            # W-6: Also cleanup expired disconnected agents
+            await self.ws_manager.cleanup_disconnected()
 
     async def _snapshot_loop(self):
-        """Periodic world state snapshot (every 300 ticks = 10 min)."""
+        """Periodic world state snapshot (every 600s). Includes WAL truncation."""
         while self._running:
             await asyncio.sleep(600)
             try:
@@ -363,6 +391,11 @@ class GameServer:
                     "weather": self.world.weather.value,
                 }
                 save_snapshot(self._tick, snapshot)
+                # P-1: Write WAL entries for this period and truncate old entries
+                if self.world.changes:
+                    from .db import write_wal_entries, truncate_wal
+                    write_wal_entries(self._tick, self.world.changes)
+                    truncate_wal(self._tick)
                 print(f"Snapshot saved at tick {self._tick}")
             except Exception as e:
                 print(f"Snapshot error: {e}")

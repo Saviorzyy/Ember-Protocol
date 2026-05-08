@@ -66,6 +66,9 @@ class Equipment:
     main_hand: Optional[str] = None
     off_hand: Optional[str] = None
     armor: Optional[str] = None
+    main_hand_durability: Optional[int] = None
+    off_hand_durability: Optional[int] = None
+    armor_durability: Optional[int] = None
 
 
 @dataclass
