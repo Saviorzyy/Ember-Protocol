@@ -2502,7 +2502,7 @@ When creating a new character, the drop pod is deployed to the map:
 | Rule | Description |
 |------|-------------|
 | Deployment zone | Y = 180~220 (Center zone), X = random |
-| Deployment condition | L1 ≠ Water, no other drop pod shield overlap |
+| Deployment condition | L1 ∈ {flat, sand}, tile passable (no Stone/Wall blocking), no other drop pod shield overlap |
 | Deployment method | Pseudo-random scatter, ensuring ≥10 tiles between any two drop pods |
 | Initial state | Deployed, shield active |
 

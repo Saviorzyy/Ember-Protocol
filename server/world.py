@@ -78,7 +78,7 @@ class World:
             x = random.randint(20, W - 20)
             y = random.randint(SPAWN_Y_RANGE[0], SPAWN_Y_RANGE[1])
             tile = self.get_tile(x, y)
-            if tile and tile.l1 not in (Terrain.WATER, Terrain.TRENCH):
+            if tile and tile.l1 in (Terrain.FLAT, Terrain.SAND) and tile.passable:
                 # Check minimum distance from other drop pods
                 pos = Position(x, y)
                 too_close = False
