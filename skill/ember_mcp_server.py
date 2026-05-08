@@ -68,7 +68,7 @@ class GameClient:
         self._tick_n = 0
         self._state = {}
         self._reader_task = None
-        self._reconnecting = False
+        self._reconnect_lock = asyncio.Lock()
 
     async def connect(self) -> dict:
         """Connect with retry. Returns session dict."""
@@ -150,10 +150,13 @@ class GameClient:
 
     async def _ensure_connected(self):
         """Auto-reconnect if disconnected."""
-        if not self._ok or not self.ws:
-            if self._reconnecting:
-                return False
-            self._reconnecting = True
+        if self._ok and self.ws:
+            return True
+        if self._reconnect_lock.locked():
+            return False
+        async with self._reconnect_lock:
+            if self._ok and self.ws:
+                return True
             try:
                 print("[Ember MCP] Reconnecting...", file=sys.stderr)
                 await self.connect()
@@ -161,9 +164,6 @@ class GameClient:
             except Exception as e:
                 print(f"[Ember MCP] Reconnect failed: {e}", file=sys.stderr)
                 return False
-            finally:
-                self._reconnecting = False
-        return True
 
     async def wait_tick(self, timeout=None) -> dict:
         """Wait for next tick. Returns frame dict or error dict on timeout."""
@@ -171,6 +171,16 @@ class GameClient:
             timeout = self.TICK_TIMEOUT
         if not await self._ensure_connected():
             return {"type": "error", "error": "disconnected", "message": "与游戏服务器的连接已断开，无法获取 tick。请稍后重试。"}
+        # Drain stale frames, keep only the latest
+        latest = None
+        while not self._tick_q.empty():
+            try:
+                latest = self._tick_q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        if latest is not None:
+            return latest
+        # No stale frames, wait for fresh one
         try:
             return await asyncio.wait_for(self._tick_q.get(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -342,6 +352,15 @@ def _fmt_result(frame: dict) -> str:
 
         if r.get("type") == "inspect" and r.get("recipes"):
             lines.append(f"  配方数: {len(r['recipes'])}")
+            for rec in r["recipes"][:30]:
+                rid = rec.get("id", "?")
+                station = rec.get("station", "?")
+                mats = rec.get("materials", {})
+                mat_str = ", ".join(f"{k}×{v}" for k, v in mats.items())
+                output = rec.get("output", rid)
+                amount = rec.get("amount", 1)
+                out_str = f" → {output}×{amount}" if output != rid or amount > 1 else ""
+                lines.append(f"  {rid}: [{station}] {mat_str}{out_str}")
 
         if r.get("type") == "scan" and r.get("found"):
             for f in r["found"]:
@@ -527,6 +546,15 @@ def create_mcp_server(game: GameClient) -> Server:
                             elif t == "scan": summary["scans"] += 1
 
                 end_energy = game.state.get("energy", 100)
+
+                # Drain stale tick frames to update state to latest
+                while not game._tick_q.empty():
+                    try:
+                        f = game._tick_q.get_nowait()
+                        if "state" in f:
+                            game._state = f["state"]
+                    except asyncio.QueueEmpty:
+                        break
 
                 lines = [
                     f"## 自动游玩 {ticks} ticks 完成",

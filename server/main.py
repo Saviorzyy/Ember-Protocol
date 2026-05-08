@@ -197,6 +197,11 @@ class GameServer:
             "tutorial_phase": agent.tutorial_phase,
             "inventory_summary": self.world._inventory_summary(agent),
             "attributes": {"PER": agent.perception, "CON": agent.constitution, "AGI": agent.agility},
+            "weather": self.world.weather.value,
+            "weather_remaining": self.world.weather_remaining if self.world.weather.value == "radiation_storm" else 0,
+            "weather_warning": self.world.weather_warning_sent,
+            "weather_warning_countdown": getattr(self.world, 'weather_warning_countdown', 0),
+            "radiation_debuff": agent.radiation_debuff,
         }
 
         return {
@@ -267,9 +272,9 @@ class GameServer:
             ]
         elif tp == 4:
             lines.append(f"\n**[教程 Phase 4: 通信与生存]**")
-            lines.append(f"  尝试广播或休息，完成教程毕业。")
-            lines.append(f"  精确行动: `[{{\"type\":\"rest\"}}]`")
-            suggested_actions = [{"type": "rest"}]
+            lines.append(f"  发送一次广播完成教程毕业。")
+            lines.append(f"  精确行动: `[{{\"type\":\"radio_broadcast\",\"content\":\"hello world\"}}]`")
+            suggested_actions = [{"type": "radio_broadcast", "content": "hello ember"}]
         elif tp is None:
             lines.append(f"\n**[自由模式]** 已毕业，自主探索生存")
 
@@ -330,7 +335,12 @@ class GameServer:
         for cid, creature in world.creatures.items():
             d = agent.position.dist(creature.position)
             if d <= view_range:
-                creatures_seen.append(f"{creature.creature_type}({creature.position.x},{creature.position.y} HP:{creature.hp}/{creature.max_hp})")
+                from .config import CREATURE_DROPS
+                drops = CREATURE_DROPS.get(creature.creature_type, {})
+                drop_str = ""
+                if "primary" in drops:
+                    drop_str = f" 掉落:{drops['primary'][0]}"
+                creatures_seen.append(f"{creature.creature_type}({creature.position.x},{creature.position.y} HP:{creature.hp}/{creature.max_hp}{drop_str})")
         if creatures_seen:
             lines.append(f"  生物: {', '.join(creatures_seen)}")
 
@@ -340,10 +350,19 @@ class GameServer:
             resources = [t for t in terrain_seen if '石料' in t or '灌木' in t or '灰木树' in t or '壁生苔' in t or '碎石' in t]
             other = [t for t in terrain_seen if t not in resources]
             if resources:
-                sample = resources[:12]
+                # Sort by distance (extract coords from resource strings like "石料×5(92,93)")
+                import re
+                def _res_dist(r):
+                    m = re.search(r'\((\d+),(\d+)\)', r)
+                    if m:
+                        rx, ry = int(m.group(1)), int(m.group(2))
+                        return abs(rx - pos.x) + abs(ry - pos.y)
+                    return 999
+                resources.sort(key=_res_dist)
+                sample = resources[:20]
                 lines.append(f"  ⛏ 可采集: {', '.join(sample)}")
-                if len(resources) > 12:
-                    lines.append(f"  ...等共{len(resources)}处资源")
+                if len(resources) > 20:
+                    lines.append(f"  ...等共{len(resources)}处资源 (已显示最近的20处)")
             # Just show terrain types summary for the rest
             if other:
                 flat_count = sum(1 for t in other if '平地' in t)

@@ -22,6 +22,7 @@ class World:
         self.weather = Weather.CALM
         self.weather_remaining = 0
         self.weather_warning_sent = False
+        self.weather_warning_countdown = 0
         self.storm_cooldown = random.randint(STORM_INTERVAL_MIN, STORM_INTERVAL_MAX)
 
         # Core state
@@ -659,7 +660,7 @@ class World:
         if not self.in_bounds(tx, ty):
             return {"type": "mine", "success": False, "error_code": "INVALID_TARGET", "detail": "目标坐标无效"}
         if agent.position.dist(Position(tx, ty)) > 1:
-            return {"type": "mine", "success": False, "error_code": "OUT_OF_RANGE", "detail": "目标不在相邻格"}
+            return {"type": "mine", "success": False, "error_code": "OUT_OF_RANGE", "detail": f"目标不在相邻格 (当前:{agent.position.x},{agent.position.y} → 目标:{tx},{ty} 距离:{agent.position.dist(Position(tx, ty))})"}
         if agent.energy < ENERGY_MINE:
             return {"type": "mine", "success": False, "error_code": "INSUFFICIENT_ENERGY", "detail": "能量不足"}
 
@@ -742,7 +743,7 @@ class World:
         if not self.in_bounds(tx, ty):
             return {"type": "chop", "success": False, "error_code": "INVALID_TARGET", "detail": "目标坐标无效"}
         if agent.position.dist(Position(tx, ty)) > 1:
-            return {"type": "chop", "success": False, "error_code": "OUT_OF_RANGE", "detail": "目标不在相邻格"}
+            return {"type": "chop", "success": False, "error_code": "OUT_OF_RANGE", "detail": f"目标不在相邻格 (当前:{agent.position.x},{agent.position.y} → 目标:{tx},{ty} 距离:{agent.position.dist(Position(tx, ty))})"}
         if agent.energy < ENERGY_CHOP:
             return {"type": "chop", "success": False, "error_code": "INSUFFICIENT_ENERGY", "detail": "能量不足"}
 
@@ -1215,7 +1216,7 @@ class World:
         if not self.in_bounds(tx, ty):
             return {"type": "build", "success": False, "error_code": "INVALID_TARGET", "detail": "目标超出地图边界"}
         if agent.position.dist(Position(tx, ty)) > 1:
-            return {"type": "build", "success": False, "error_code": "OUT_OF_RANGE", "detail": "目标不在建造范围"}
+            return {"type": "build", "success": False, "error_code": "OUT_OF_RANGE", "detail": f"目标不在建造范围 (当前:{agent.position.x},{agent.position.y} → 目标:{tx},{ty} 距离:{agent.position.dist(Position(tx, ty))})"}
         if agent.energy < ENERGY_BUILD:
             return {"type": "build", "success": False, "error_code": "INSUFFICIENT_ENERGY", "detail": "能量不足"}
 
@@ -1246,8 +1247,9 @@ class World:
         costs = BUILD_COSTS.get(building_type, {})
         for mat, amt in costs.items():
             if not self.has_item(agent, mat, amt):
+                costs_str = ", ".join(f"{m}×{a}" for m, a in BUILD_COSTS.get(building_type, {}).items())
                 return {"type": "build", "success": False, "error_code": "MISSING_MATERIALS",
-                        "detail": f"缺少 {mat}×{amt}", "missing": {mat: amt}}
+                        "detail": f"缺少 {mat}×{amt} (合成{building_type}需: {costs_str})", "missing": {mat: amt}}
 
         # Consume materials
         for mat, amt in costs.items():
@@ -1459,19 +1461,26 @@ class World:
         elif self.storm_cooldown <= 0:
             if not self.weather_warning_sent:
                 self.weather_warning_sent = True
+                self.weather_warning_countdown = STORM_WARNING_TICKS
                 self._log_event("weather_warning", {"weather": "radiation_storm", "in_ticks": STORM_WARNING_TICKS})
                 for aid, a in self.agents.items():
                     if a.online:
                         self.tick_notifications[aid].append({"type": "weather_warning", "weather": "radiation_storm", "in_ticks": STORM_WARNING_TICKS})
             else:
-                self.weather = Weather.RADIATION_STORM
-                self.weather_remaining = STORM_DURATION
-                self.weather_warning_sent = False
-                self.storm_cooldown = random.randint(STORM_INTERVAL_MIN, STORM_INTERVAL_MAX)
-                self._log_change("weather_change", from_weather="calm", to_weather="radiation_storm", duration=STORM_DURATION)
-                for aid, a in self.agents.items():
-                    if a.online:
-                        self.tick_notifications[aid].append({"type": "storm_start", "weather": "radiation_storm", "duration": STORM_DURATION})
+                self.weather_warning_countdown -= 1
+                if self.weather_warning_countdown <= 0:
+                    # Storm actually starts now, after full countdown
+                    self.weather = Weather.RADIATION_STORM
+                    self.weather_remaining = STORM_DURATION
+                    self.weather_warning_sent = False
+                    self.storm_cooldown = random.randint(STORM_INTERVAL_MIN, STORM_INTERVAL_MAX)
+                    self._log_change("weather_change", from_weather="calm", to_weather="radiation_storm", duration=STORM_DURATION)
+                    for aid, a in self.agents.items():
+                        if a.online:
+                            self.tick_notifications[aid].append({"type": "storm_start", "weather": "radiation_storm", "duration": STORM_DURATION})
+                else:
+                    # Still counting down, notify remaining ticks
+                    self._log_event("weather_warning_countdown", {"remaining_ticks": self.weather_warning_countdown})
 
         # Radiation damage (area radiation S-1 + storm damage S-2, enclosure immunity S-4)
         for agent in list(self.agents.values()):
