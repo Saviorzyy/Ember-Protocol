@@ -150,7 +150,7 @@ class GameClient:
 
     async def _ensure_connected(self):
         """Auto-reconnect if disconnected."""
-        if not self._ok or not self.ws or self.ws.closed:
+        if not self._ok or not self.ws:
             if self._reconnecting:
                 return False
             self._reconnecting = True
