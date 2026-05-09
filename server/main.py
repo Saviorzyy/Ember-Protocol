@@ -98,36 +98,42 @@ class GameServer:
             await asyncio.sleep(1)
 
     async def _tick_loop(self):
-        """Main tick loop."""
+        """Main tick loop with crash recovery."""
         while self._running:
             tick_start = time.monotonic()
+            try:
+                # Start tick
+                self.world.start_tick(self._tick)
 
-            # Start tick
-            self.world.start_tick(self._tick)
+                # Build and broadcast per-agent tick frames
+                for agent_id, ws_conn in list(self.ws_manager.connections.items()):
+                    tick_frame = self.build_tick_for_agent(agent_id)
+                    queue = self.ws_manager.send_queues.get(agent_id)
+                    if queue:
+                        await queue.put(tick_frame)
 
-            # Build and broadcast per-agent tick frames
-            for agent_id, ws_conn in list(self.ws_manager.connections.items()):
-                tick_frame = self.build_tick_for_agent(agent_id)
-                queue = self.ws_manager.send_queues.get(agent_id)
-                if queue:
-                    await queue.put(tick_frame)
+                # Wait for collection window
+                await asyncio.sleep(TICK_INTERVAL)
 
-            # Wait for collection window
-            await asyncio.sleep(TICK_INTERVAL)
+                # Actions are now settled immediately in ws_handler
+                # Just advance the world state
+                self.world.advance_world()
 
-            # Actions are now settled immediately in ws_handler
-            # Just advance the world state
-            self.world.advance_world()
+                # P-1: Write WAL entries for this tick
+                if self.world.changes:
+                    from .db import write_wal_entries
+                    write_wal_entries(self._tick, self.world.changes)
 
-            # P-1: Write WAL entries for this tick
-            if self.world.changes:
-                from .db import write_wal_entries
-                write_wal_entries(self._tick, self.world.changes)
+                # Flush tick notifications to connected agents
+                for aid, notifs in list(self.world.tick_notifications.items()):
+                    for notif in notifs:
+                        await self.ws_manager.send_event(aid, notif.get("type", "event"), notif)
 
-            # Flush tick notifications to connected agents
-            for aid, notifs in list(self.world.tick_notifications.items()):
-                for notif in notifs:
-                    await self.ws_manager.send_event(aid, notif.get("type", "event"), notif)
+            except Exception as e:
+                print(f"  [TICK ERROR] tick {self._tick}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue tick loop — don't let one error kill the game
 
             # Maintain cadence
             elapsed = time.monotonic() - tick_start

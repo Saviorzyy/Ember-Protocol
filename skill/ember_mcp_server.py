@@ -368,12 +368,14 @@ def _fmt_result(frame: dict) -> str:
             for rec in r["recipes"][:30]:
                 rid = rec.get("id", "?")
                 station = rec.get("station", "?")
+                hint = rec.get("station_hint", "")
                 mats = rec.get("materials", {})
                 mat_str = ", ".join(f"{k}×{v}" for k, v in mats.items())
                 output = rec.get("output", rid)
                 amount = rec.get("amount", 1)
                 out_str = f" → {output}×{amount}" if output != rid or amount > 1 else ""
-                lines.append(f"  {rid}: [{station}] {mat_str}{out_str}")
+                hint_str = f" ({hint})" if hint else ""
+                lines.append(f"  {rid}: [{station}]{hint_str} {mat_str}{out_str}")
 
         if r.get("type") == "scan" and r.get("found"):
             for f in r["found"]:

@@ -1219,7 +1219,7 @@ class World:
         if not self.in_bounds(tx, ty):
             return {"type": "build", "success": False, "error_code": "INVALID_TARGET", "detail": "目标超出地图边界"}
         if agent.position.dist(Position(tx, ty)) > 1:
-            return {"type": "build", "success": False, "error_code": "OUT_OF_RANGE", "detail": f"目标不在建造范围 (当前:{agent.position.x},{agent.position.y} → 目标:{tx},{ty} 距离:{agent.position.dist(Position(tx, ty))})"}
+            return {"type": "build", "success": False, "error_code": "OUT_OF_RANGE", "detail": f"目标不在建造范围 (当前:{agent.position.x},{agent.position.y} → 目标:{tx},{ty} 距离:{agent.position.dist(Position(tx, ty))}, 最大范围:1格)"}
         if agent.energy < ENERGY_BUILD:
             return {"type": "build", "success": False, "error_code": "INSUFFICIENT_ENERGY", "detail": "能量不足"}
 
@@ -1314,9 +1314,9 @@ class World:
                     "state": self._agent_state_dict(agent)}
         elif target == "recipes":
             recipes = []
-            recipes.extend([{"id": k, "station": "furnace", **v} for k, v in FURNACE_RECIPES.items()])
-            recipes.extend([{"id": k, "station": "handcraft", **v} for k, v in HANDCRAFT_RECIPES.items()])
-            recipes.extend([{"id": k, "station": "workbench", **v} for k, v in WORKBENCH_RECIPES.items()])
+            recipes.extend([{"id": k, "station": "furnace", "station_hint": "需在熔炉旁1格内", **v} for k, v in FURNACE_RECIPES.items()])
+            recipes.extend([{"id": k, "station": "handcraft", "station_hint": "随时随地可合成", **v} for k, v in HANDCRAFT_RECIPES.items()])
+            recipes.extend([{"id": k, "station": "workbench", "station_hint": "需在工作台旁1格内", **v} for k, v in WORKBENCH_RECIPES.items()])
             return {"type": "inspect", "success": True, "detail": f"可用配方 ({len(recipes)})", "recipes": recipes}
         elif target == "map":
             vicinity = self.get_vicinity(agent)
@@ -1512,7 +1512,8 @@ class World:
                 self._log_event("radiation_damage", {"agent_id": agent.agent_id, "damage": dmg})
                 self.tick_notifications[agent.agent_id].append({
                     "type": "radiation_damage", "damage": dmg,
-                    "hp_remaining": agent.health, "source": "area_radiation"
+                    "hp_remaining": agent.health, "source": "area_radiation",
+                    "detail": f"区域辐射 -{dmg}HP (距中心越远辐射越强，进入建筑可免疫)"
                 })
                 if agent.health <= 0:
                     self._handle_death(agent)

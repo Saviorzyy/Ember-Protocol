@@ -106,15 +106,17 @@ async def handle_map_data(request: web.Request) -> web.Response:
                     "veg": tile.veg_type,
                     "structure": tile.structure.building_type.value if tile.structure else "",
                 })
-                if tile.structure:
-                    structures.append({
-                        "x": x, "y": y,
-                        "type": tile.structure.building_type.value,
-                        "hp": tile.structure.hp,
-                        "max_hp": tile.structure.max_hp,
-                        "owner": tile.structure.owner_id,
-                    })
         tiles.append(row)
+
+    # Collect ALL structures (not just those on sampled tiles)
+    for sid, struct in world.structures.items():
+        structures.append({
+            "x": struct.position.x, "y": struct.position.y,
+            "type": struct.building_type.value,
+            "hp": struct.hp,
+            "max_hp": struct.max_hp,
+            "owner": struct.owner_id,
+        })
 
     # Collect drop pod positions
     for agent_id, agent in world.agents.items():

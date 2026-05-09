@@ -210,6 +210,15 @@ class WSManager:
                             agent.tutorial_phase = None  # Graduate!
                             progressed = True
 
+                    if progressed:
+                        # Notify agent of phase transition
+                        phase_names = {0: "苏醒", 1: "部署与采集", 2: "建造与合成", 3: "建造与庇护", 4: "通信与生存"}
+                        old_name = phase_names.get(phase, f"Phase {phase}")
+                        new_name = "自由模式(毕业!)" if agent.tutorial_phase is None else phase_names.get(agent.tutorial_phase, f"Phase {agent.tutorial_phase}")
+                        await queue.put({"type": "event", "event": "tutorial_progress",
+                            "data": {"from_phase": phase, "to_phase": agent.tutorial_phase,
+                                     "message": f"✓ 教程阶段完成: {old_name} → {new_name}"}})
+
                     if not progressed:
                         agent.tutorial_skip_count += 1
                         if agent.tutorial_skip_count >= TUTORIAL_MAX_SKIPS:
