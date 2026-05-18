@@ -119,7 +119,6 @@ async def handle_status(request: web.Request) -> web.Response:
     })
 
 
-@auth_required
 async def handle_map_data(request: web.Request) -> web.Response:
     """GET /api/v1/map — Returns map tile data for rendering (includes structures)."""
     world: World = request.app["world"]
@@ -184,7 +183,6 @@ async def handle_map_data(request: web.Request) -> web.Response:
     })
 
 
-@auth_required
 async def handle_agents_list(request: web.Request) -> web.Response:
     """GET /api/v1/agents — List all agents with full details."""
     world: World = request.app["world"]
@@ -219,7 +217,6 @@ async def handle_agents_list(request: web.Request) -> web.Response:
     return web.json_response({"agents": agents})
 
 
-@auth_required
 async def handle_agent_detail(request: web.Request) -> web.Response:
     """GET /api/v1/agents/{agent_id} — Get single agent details."""
     world: World = request.app["world"]

@@ -28,6 +28,14 @@ interface StormParticle {
   size: number; alpha: number
 }
 
+interface RadiationFog {
+  x: number; y: number
+  vx: number       // horizontal drift speed
+  radius: number   // cloud patch size
+  alpha: number    // base opacity
+  phase: number    // pulse phase offset
+}
+
 interface EventAnim {
   id: string
   type: 'attack' | 'broadcast' | 'build'
@@ -86,6 +94,10 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent,
   const stormFadeRef = useRef(0)          // 0-1 fade in/out lerp
   const prevWeatherRef = useRef(weather)
 
+  // --- Area radiation fog (S-1 persistent) ---
+  const fogRef = useRef<RadiationFog[]>([])
+  const fogSpawnCounterRef = useRef(0)
+
   // --- Event animations ---
   const eventAnimsRef = useRef<EventAnim[]>([])
   const processedEventIdsRef = useRef<Set<string>>(new Set())
@@ -108,32 +120,33 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent,
       ctx.fillStyle = grad
       ctx.fillRect(0, 0, canvas.width, canvas.height)
     } else if (dayPhase === 'night') {
-      // Deep night overlay with vision circles around agents
-      ctx.save()
-      ctx.fillStyle = 'rgba(5, 8, 30, 0.65)'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-      // Cut out vision circles around each online agent using destination-out
-      ctx.globalCompositeOperation = 'destination-out'
+      // Use offscreen canvas so destination-out doesn't cut the main scene
+      const nightCanvas = document.createElement('canvas')
+      nightCanvas.width = canvas.width
+      nightCanvas.height = canvas.height
+      const nctx = nightCanvas.getContext('2d')!
+      nctx.fillStyle = 'rgba(5, 8, 30, 0.65)'
+      nctx.fillRect(0, 0, canvas.width, canvas.height)
+      // Cut vision circles — only affects the offscreen overlay
+      nctx.globalCompositeOperation = 'destination-out'
       for (const agent of agents) {
         if (!agent.online) continue
         const [ax, ay] = agent.position
         const cx = ox + ax * tileSize + tileSize / 2
         const cy = oy + ay * tileSize + tileSize / 2
-        const visionRange = 5   // tiles in each direction
-        const radius = visionRange * tileSize
-
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius)
+        const radius = 5 * tileSize
+        const grad = nctx.createRadialGradient(cx, cy, 0, cx, cy, radius)
         grad.addColorStop(0, 'rgba(255,255,255,1)')
         grad.addColorStop(0.4, 'rgba(255,255,255,0.95)')
         grad.addColorStop(0.7, 'rgba(255,255,255,0.5)')
         grad.addColorStop(1, 'rgba(255,255,255,0)')
-        ctx.fillStyle = grad
-        ctx.beginPath()
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-        ctx.fill()
+        nctx.fillStyle = grad
+        nctx.beginPath()
+        nctx.arc(cx, cy, radius, 0, Math.PI * 2)
+        nctx.fill()
       }
-      ctx.restore()
+      nctx.globalCompositeOperation = 'source-over'
+      ctx.drawImage(nightCanvas, 0, 0)
     } else if (dayPhase === 'dawn') {
       // Cool light-blue gradient fading toward normal
       const grad = ctx.createLinearGradient(0, 0, 0, canvas.height)
@@ -199,6 +212,69 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent,
       const a = p.alpha * stormFadeRef.current * pulse
       ctx.fillStyle = `rgba(0, 255, 68, ${a})`
       ctx.fillRect(p.x, p.y, p.size, p.size)
+    }
+    ctx.restore()
+  }
+
+  // ===================================================================
+  //  2b. AREA RADIATION FOG (S-1 persistent, zone-based)
+  // ===================================================================
+
+  function updateRadiationFog(canvasW: number, canvasH: number) {
+    const fog = fogRef.current
+    const now = Date.now()
+
+    // Spawn new fog patches — rate proportional to visible Y-coverage
+    // Spawn evenly across Y but bias toward edges using rad density
+    fogSpawnCounterRef.current += 1
+    const spawnInterval = fog.length > 60 ? 8 : 3
+    if (fogSpawnCounterRef.current % spawnInterval === 0) {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        // Pick Y biased by radiation probability: lerp(0, 0.30, w)
+        const py = Math.random()
+        const w = Math.abs(py - 0.5) * 2  // 0 at center, 1 at edge
+        const density = 0.30 * w           // same curve as rad_prob
+        if (Math.random() < density) {
+          const y = py * canvasH
+          fog.push({
+            x: Math.random() * (canvasW + 200) - 100,
+            y,
+            vx: -0.15 - Math.random() * 0.2,
+            radius: 40 + Math.random() * 80,
+            alpha: 0.06 + Math.random() * 0.08,
+            phase: Math.random() * Math.PI * 2,
+          })
+        }
+      }
+    }
+
+    // Update existing fog patches — drift left, pulse, remove when off-screen
+    for (let i = fog.length - 1; i >= 0; i--) {
+      const f = fog[i]
+      f.x += f.vx
+      if (f.x + f.radius < -200 || f.x - f.radius > canvasW + 200) {
+        fog.splice(i, 1)
+      }
+    }
+  }
+
+  function drawRadiationFog(ctx: CanvasRenderingContext2D, canvasW: number, canvasH: number) {
+    const fog = fogRef.current
+    if (fog.length === 0) return
+
+    ctx.save()
+    const now = Date.now()
+    for (const f of fog) {
+      const pulse = 0.7 + 0.3 * Math.sin(now / 3000 + f.phase)
+      const a = f.alpha * pulse
+      const grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.radius)
+      grad.addColorStop(0, `rgba(180, 220, 40, ${a})`)
+      grad.addColorStop(0.4, `rgba(160, 200, 30, ${a * 0.5})`)
+      grad.addColorStop(1, 'rgba(180, 220, 40, 0)')
+      ctx.fillStyle = grad
+      ctx.beginPath()
+      ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2)
+      ctx.fill()
     }
     ctx.restore()
   }
@@ -481,10 +557,11 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent,
       if (px + tileSize < 0 || px > canvas.width || py + tileSize < 0 || py > canvas.height) continue
 
       const isSelected = selectedAgent?.agent_id === agent.agent_id
-      ctx.fillStyle = isSelected ? '#00d4aa' : '#0099ff'
-      ctx.fillRect(px, py, tileSize, tileSize)
-      ctx.fillStyle = '#0a0e17'
+      ctx.fillStyle = isSelected ? '#00d4aa' : '#4a9eff'
       ctx.fillRect(px + 1, py + 1, tileSize - 2, tileSize - 2)
+      ctx.strokeStyle = isSelected ? '#00d4aa' : '#2a6eb0'
+      ctx.lineWidth = 1
+      ctx.strokeRect(px + 0.5, py + 0.5, tileSize - 1, tileSize - 1)
 
       const hpPct = agent.health / agent.max_health
       ctx.fillStyle = hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00'
@@ -526,6 +603,10 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent,
     // 1. Day phase overlay
     drawDayPhaseOverlay(ctx, canvas, ox, oy, tileSize)
 
+    // 1b. Area radiation fog (S-1 persistent — zone-based cloud patches)
+    updateRadiationFog(canvas.width, canvas.height)
+    drawRadiationFog(ctx, canvas.width, canvas.height)
+
     // 2. Radiation storm particles
     updateStormParticles(canvas.width, canvas.height)
     drawStormParticles(ctx, canvas.width, canvas.height)
@@ -558,7 +639,11 @@ export default function GameMap({ mapData, agents, selectedAgent, onSelectAgent,
 
     let animFrameId: number
     const loop = () => {
-      draw()
+      try {
+        draw()
+      } catch (e) {
+        console.error('GameMap draw error:', e)
+      }
       animFrameId = requestAnimationFrame(loop)
     }
     animFrameId = requestAnimationFrame(loop)

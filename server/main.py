@@ -10,12 +10,12 @@ from aiohttp import web
 import aiohttp_cors
 
 from .world import World
-from .models import ActionStatus
+from .models import ActionStatus, InventoryItem, Position
 from .ws_handler import WSManager
 from .http_routes import handle_register, handle_status, handle_map_data, handle_agents_list, handle_agent_detail, handle_actions_log, handle_events, handle_rotate_token
 from .sse_handler import SSEManager, handle_sse_stream
 from .db import init_db, save_snapshot, load_latest_snapshot, read_wal_after, truncate_wal
-from .config import MAP_SEED, TICK_INTERVAL, TICK_CADENCE, HEARTBEAT_INTERVAL, HEARTBEAT_MAX_MISS, STORM_WARNING_TICKS
+from .config import MAP_SEED, TICK_INTERVAL, TICK_CADENCE, HEARTBEAT_INTERVAL, HEARTBEAT_MAX_MISS, STORM_WARNING_TICKS, HP_DROP_POD_SHIELD_REGEN
 
 
 class GameServer:
@@ -47,6 +47,46 @@ class GameServer:
         for row in conn.execute("SELECT agent_id, token_hash FROM agents").fetchall():
             self.world.token_hashes[row[0]] = row[1]
         conn.close()
+
+        # Restore agent state from snapshot (if any)
+        if snapshot:
+            data = snapshot[1]
+            if "agents" in data:
+                restored_count = 0
+                for aid, agent_data in data["agents"].items():
+                    agent = self.world.agents.get(aid)
+                    if not agent:
+                        continue
+                    if "position" in agent_data:
+                        agent.position = Position(*agent_data["position"])
+                    if "health" in agent_data:
+                        agent.health = agent_data["health"]
+                    if "energy" in agent_data:
+                        agent.energy = agent_data["energy"]
+                    if "inventory" in agent_data:
+                        agent.inventory = [
+                            InventoryItem(**item) for item in agent_data["inventory"]
+                        ]
+                    if "equipment" in agent_data:
+                        eq = agent_data["equipment"]
+                        agent.equipment.main_hand = eq.get("main_hand")
+                        agent.equipment.off_hand = eq.get("off_hand")
+                        agent.equipment.armor = eq.get("armor")
+                    if "backup_count" in agent_data:
+                        agent.backup_count = agent_data["backup_count"]
+                    if "radiation_debuff" in agent_data:
+                        agent.radiation_debuff = agent_data["radiation_debuff"]
+                    if "drop_pod_pos" in agent_data and agent_data["drop_pod_pos"]:
+                        agent.drop_pod_pos = Position(*agent_data["drop_pod_pos"])
+                    if "drop_pod_deployed" in agent_data:
+                        agent.drop_pod_deployed = agent_data["drop_pod_deployed"]
+                    if "tutorial_skip_count" in agent_data:
+                        agent.tutorial_skip_count = agent_data["tutorial_skip_count"]
+                    if "creature_kills" in agent_data:
+                        agent.creature_kills = agent_data["creature_kills"]
+                    restored_count += 1
+                if restored_count:
+                    print(f"Restored {restored_count} agent(s) from snapshot")
 
     async def start(self, host: str = "0.0.0.0", port: int = 8765):
         """Start the game server."""
@@ -301,12 +341,9 @@ class GameServer:
             suggested_actions = [{"type": "inspect", "target": "inventory"}]
         elif tp == 1:
             px, py = pos.x, pos.y
-            # Must move 4+ tiles to escape drop pod shield (range 3)
-            bx, by = px + 4, py
-            fx, fy = px + 5, py
             lines.append(f"\n**[教程 Phase 1: 部署与采集]**")
-            lines.append(f"  走出降落仓护盾范围（4格以上），建造工作台和熔炉（背包中的成品直接部署，无需额外材料）。")
-            lines.append(f"  精确行动: 先走4步离开护盾，然后建造。")
+            lines.append(f"  ⚠ 重要: 工作台和熔炉必须建在你**当前所在格** (dist=0), 不是相邻格！")
+            lines.append(f"  先往一个方向走4步离开护盾范围，然后: [{{\"type\":\"build\",\"building_type\":\"workbench\",\"target\":{{\"x\":{px+4},\"y\":{py}}}}}, {{\"type\":\"build\",\"building_type\":\"furnace\",\"target\":{{\"x\":{px+4},\"y\":{py}}}}}]")
             suggested_actions = [
                 {"type": "move", "direction": "east"},
                 {"type": "move", "direction": "east"},
@@ -316,24 +353,36 @@ class GameServer:
         elif tp == 2:
             px, py = pos.x, pos.y
             lines.append(f"\n**[教程 Phase 2: 建造与合成]**")
-            lines.append(f"  部署工作台和熔炉（背包成品直接放置），然后采集石料合成工具。")
-            lines.append(f"  精确行动: 建造工作台+熔炉（背包中的成品无需额外材料），或采集附近资源。")
+            lines.append(f"  在当前格部署工作台和熔炉（背包成品直接放置），然后采集石料合成工具。")
+            lines.append(f"  建造: [{{\"type\":\"build\",\"building_type\":\"workbench\",\"target\":{{\"x\":{px},\"y\":{py}}}}}, {{\"type\":\"build\",\"building_type\":\"furnace\",\"target\":{{\"x\":{px},\"y\":{py}}}}}]")
+            lines.append(f"  然后采集附近石料，合成 basic_excavator。")
             suggested_actions = [
-                {"type": "build", "building_type": "workbench", "target": {"x": px+1, "y": py}},
-                {"type": "build", "building_type": "furnace", "target": {"x": px-1, "y": py}},
+                {"type": "build", "building_type": "workbench", "target": {"x": px, "y": py}},
+                {"type": "build", "building_type": "furnace", "target": {"x": px, "y": py}},
+                {"type": "mine", "target": {"x": px+1, "y": py}},
                 {"type": "scan"},
             ]
         elif tp == 3:
             px, py = pos.x, pos.y
+            has_stone = self.world.has_item(agent, "stone", 3)
             lines.append(f"\n**[教程 Phase 3: 建造与庇护]**")
-            lines.append(f"  辐射风暴即将来临！合成建材方块，围合封闭空间。")
-            lines.append(f"  精确行动: `[{{\"type\":\"craft\",\"recipe\":\"building_block\"}},{{\"type\":\"craft\",\"recipe\":\"building_block\"}},{{\"type\":\"build\",\"building_type\":\"wall\",\"target\":{{\"x\":{px+1},\"y\":{py}}}}},{{\"type\":\"build\",\"building_type\":\"door\",\"target\":{{\"x\":{px-1},\"y\":{py}}}}}]`")
-            suggested_actions = [
-                {"type": "craft", "recipe": "building_block"},
-                {"type": "craft", "recipe": "building_block"},
-                {"type": "build", "building_type": "wall", "target": {"x": px+1, "y": py}},
-                {"type": "build", "building_type": "door", "target": {"x": px-1, "y": py}},
-            ]
+            lines.append(f"  辐射风暴即将来临！用墙壁和门围合封闭空间免疫辐射。")
+            if has_stone:
+                lines.append(f"  精确行动: 合成 building_block×2 , 建墙+门。")
+                suggested_actions = [
+                    {"type": "craft", "recipe": "building_block"},
+                    {"type": "craft", "recipe": "building_block"},
+                    {"type": "build", "building_type": "wall", "target": {"x": px+1, "y": py}},
+                    {"type": "build", "building_type": "door", "target": {"x": px-1, "y": py}},
+                ]
+            else:
+                lines.append(f"  石料不足，先采集石料再合成 building_block。")
+                suggested_actions = [
+                    {"type": "mine", "target": {"x": px+1, "y": py}},
+                    {"type": "mine", "target": {"x": px+1, "y": py}},
+                    {"type": "craft", "recipe": "building_block"},
+                    {"type": "build", "building_type": "wall", "target": {"x": px+1, "y": py}},
+                ]
         elif tp == 4:
             lines.append(f"\n**[教程 Phase 4: 通信与生存]**")
             lines.append(f"  发送一次广播完成教程毕业。")
@@ -491,7 +540,10 @@ class GameServer:
         if in_enclosure:
             lines.append(f"\n🛡 辐射防护 — 你在围合建筑内，免疫辐射伤害")
         elif in_shield:
-            lines.append(f"\n🛡 辐射防护 — 你在降落仓护盾内，免疫辐射伤害")
+            regen_note = ""
+            if agent.health < agent.max_health and agent.drop_pod_deployed:
+                regen_note = f" 被动恢复 +{HP_DROP_POD_SHIELD_REGEN}HP/tick"
+            lines.append(f"\n🛡 辐射防护 — 你在降落仓护盾内，免疫辐射伤害{regen_note}")
         elif world.weather.value == "radiation_storm":
             w = abs(pos.y - CENTER_Y) / max(1, CENTER_Y)
             rad_prob = round(0.30 * w * 100)

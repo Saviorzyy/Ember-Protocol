@@ -53,7 +53,7 @@ class GameClient:
     MAX_RECONNECT_ATTEMPTS = 5
     RECONNECT_BASE_DELAY = 2.0
     TICK_TIMEOUT = 12.0
-    ACTION_TIMEOUT = 8.0
+    ACTION_TIMEOUT = 12.0
 
     def __init__(self, server_url: str, token: str):
         self.url = server_url.rstrip("/")
@@ -230,6 +230,10 @@ class GameClient:
 
         if actions:
             result_frame = await self.send_actions(tick_n, actions)
+            # Wait for next tick frame so returned state reflects post-action world
+            next_frame = await self.wait_tick()
+            if next_frame.get("type") != "error" and "state" in next_frame:
+                tick_frame = next_frame
         else:
             result_frame = {"type": "result", "tick": tick_n, "results": []}
 
@@ -277,12 +281,17 @@ ACTIONS_GUIDE = """## 可用行动
 | talk | target_agent, content | 0 |
 | use | item_id:"repair_kit"|"battery"|"radiation_antidote" | 1 |
 | attack | target_agent:"id" 或 target_creature:"id" | 2~5 |
+| dismantle | target:{x,y} (墙壁/门可从相邻格拆, 工作台/熔炉需站在建筑上) 拆墙/门得一半材料, 拆工作台/熔炉得完整建筑物品 | 2 |
+| dismantle_pod | — (站在降落仓上,需5空背包位, 4tick后获得5个组件) | 2 |
+| deploy_pod | — (需要5个降落仓组件, 4tick部署) | 2 |
+| toggle_door | target:{x,y} | 0 |
 
 ## 核心规则
 - **建筑阻挡移动和视线**：墙壁、关闭的门不可穿越
 - **石料阻挡移动**：L2石料矿层阻挡通行，需先mine开采
 - **围合建筑免疫辐射**：由墙壁和门围成的封闭空间内免疫辐射伤害
 - **降落仓提供应急电力**：护盾范围3格内可为工作台/熔炉供电
+- **降落仓可迁移**：使用 dismantle_pod 拆解(4tick)获得5个组件，再到新位置 deploy_pod
 
 ## 核心策略
 - **使用 ember_step 一步完成**：等tick + 提交行动 + 获取结果，一次调用搞定
@@ -476,6 +485,11 @@ def create_mcp_server(game: GameClient) -> Server:
                 actions = arguments.get("actions", [])
                 combined = await game.step(actions[:10] if actions else None)
 
+                # Auto-retry once on action_timeout
+                result_frame = combined.get("result_frame", {})
+                if result_frame and result_frame.get("error", "").startswith("action_timeout"):
+                    combined = await game.step(actions[:10] if actions else None)
+
                 tick_frame = combined["tick_frame"]
                 result_frame = combined["result_frame"]
 
@@ -555,49 +569,71 @@ def create_mcp_server(game: GameClient) -> Server:
                         if _rnd.random() < 0.3:
                             actions.append({"type": "rest"})
                     else:  # explore — persistent direction with resource seeking
-                        # Track position from results (more accurate than game.state)
-                        current_pos = getattr(game, '_play_pos', None)
-                        if current_pos is None:
-                            pos = game.state.get("position", [100, 100])
-                            current_pos = [pos[0], pos[1]]
-                            game._play_pos = current_pos
-
+                        # Use server-authoritative position from tick frame state
+                        pos = game.state.get("position", [100, 100])
+                        cx, cy = pos[0], pos[1]
+                        # Track blocked tiles across ticks (to avoid re-targeting)
+                        blocked_tiles = getattr(game, '_play_blocked', set())
                         # Get or initialize persistent direction
                         explore_dir = getattr(game, '_play_dir', None)
                         explore_dirs = ["north", "south", "east", "west"]
-
-                        # Try to move toward nearest visible resource
-                        target_dir = None
-                        import re
+                        dir_delta = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
+                        # Parse visible resources and decide actions
+                        actions = []
+                        has_action = False
                         res_matches = re.findall(r'(?:石料|灌木|灰木树|壁生苔|铁矿|铜矿).*?\((\d+),(\d+)\)', user_msg)
-                        if res_matches:
-                            rx, ry = int(res_matches[0][0]), int(res_matches[0][1])
-                            cx, cy = current_pos[0], current_pos[1]
-                            dx = rx - cx
-                            dy = ry - cy
-                            if abs(dx) > abs(dy):
-                                target_dir = "east" if dx > 0 else "west"
-                            elif dy != 0:
-                                target_dir = "south" if dy > 0 else "north"
-
-                        if target_dir:
-                            explore_dir = target_dir
-                        elif explore_dir is None:
-                            # Initialize — bias away from map edges
-                            cx, cy = current_pos[0], current_pos[1]
-                            weights = []
-                            for d in explore_dirs:
-                                if d == "north": w = max(cy, 10)
-                                elif d == "south": w = max(199 - cy, 10)
-                                elif d == "west": w = max(cx, 10)
-                                else: w = max(199 - cx, 10)
-                                weights.append(w)
-                            explore_dir = _rnd.choices(explore_dirs, weights=weights, k=1)[0]
-
+                        for rx_str, ry_str in res_matches:
+                            if has_action:
+                                break
+                            rx, ry = int(rx_str), int(ry_str)
+                            tile_key = (rx, ry)
+                            if tile_key in blocked_tiles:
+                                continue
+                            dist = abs(rx - cx) + abs(ry - cy)
+                            if dist == 1:
+                                # Adjacent → gather from current position
+                                ctx_start = max(0, user_msg.find(f"({rx},{ry})") - 20)
+                                ctx_end = user_msg.find(f"({rx},{ry})") + 20
+                                tile_desc = user_msg[ctx_start:ctx_end]
+                                if "灌木" in tile_desc or "灰木" in tile_desc or "壁生苔" in tile_desc:
+                                    actions = [{"type": "chop", "target": {"x": rx, "y": ry}}]
+                                elif "石料" in tile_desc:
+                                    actions = [{"type": "mine", "target": {"x": rx, "y": ry}}]
+                                else:
+                                    actions = [{"type": "mine", "target": {"x": rx, "y": ry}}]
+                                has_action = True
+                                break
+                            if dist > 1:
+                                # Move toward nearest resource (pick the closest)
+                                nearest_dist = dist
+                                dx = rx - cx
+                                dy = ry - cy
+                                if abs(dx) > abs(dy):
+                                    explore_dir = "east" if dx > 0 else "west"
+                                elif dy != 0:
+                                    explore_dir = "south" if dy > 0 else "north"
+                                has_action = True
+                        if not has_action:
+                            # No actionable resources — keep exploring
+                            if explore_dir is None:
+                                # Initialize — bias away from map edges
+                                weights = []
+                                for d in explore_dirs:
+                                    if d == "north":
+                                        w = max(cy, 10)
+                                    elif d == "south":
+                                        w = max(199 - cy, 10)
+                                    elif d == "west":
+                                        w = max(cx, 10)
+                                    else:
+                                        w = max(199 - cx, 10)
+                                    weights.append(w)
+                                explore_dir = _rnd.choices(explore_dirs, weights=weights, k=1)[0]
+                            actions = [{"type": "move", "direction": explore_dir}] * 2
+                            if _rnd.random() < 0.3:
+                                actions.append({"type": "scan"})
                         game._play_dir = explore_dir
-                        actions = [{"type": "move", "direction": explore_dir}] * 2
-                        if _rnd.random() < 0.3:
-                            actions.append({"type": "scan"})
+                        game._play_blocked = blocked_tiles
 
                     result = await game.send_actions(tick, actions)
                     for r in result.get("results", []):
@@ -605,32 +641,54 @@ def create_mcp_server(game: GameClient) -> Server:
                             t = r.get("type", "")
                             if t == "move":
                                 summary["moves"] += 1
-                                # Track position from move result
-                                detail = r.get("detail", "")
-                                import re as _re
-                                m = _re.search(r'\((\d+),\s*(\d+)\)', detail)
-                                if m and hasattr(game, '_play_pos'):
-                                    game._play_pos[0] = int(m.group(1))
-                                    game._play_pos[1] = int(m.group(2))
-                            elif t == "chop": summary["chops"] += 1; summary["wood"] += 1
-                            elif t == "mine": summary["mines"] += 1; summary["stone"] += 1
-                            elif t == "rest": summary["rests"] += 1
-                            elif t == "scan": summary["scans"] += 1
+                            elif t == "chop":
+                                summary["chops"] += 1
+                                summary["wood"] += 1
+                            elif t == "mine":
+                                summary["mines"] += 1
+                                summary["stone"] += 1
+                            elif t == "rest":
+                                summary["rests"] += 1
+                            elif t == "scan":
+                                summary["scans"] += 1
                         elif r.get("type") == "move" and r.get("error_code") == "BLOCKED":
-                            # Change direction when blocked
-                            game._play_dir = _rnd.choice([d for d in explore_dirs if d != game._play_dir])
+                            # Track blocked tile so we don't target it again
+                            dd = dir_delta.get(game._play_dir)
+                            if dd:
+                                bx, by = cx + dd[0], cy + dd[1]
+                                blocked_tiles.add((bx, by))
+                                game._play_blocked = blocked_tiles
+                            # Change direction so we don't keep bumping into the same obstacle
+                            other_dirs = [d for d in explore_dirs if d != game._play_dir]
+                            if other_dirs:
+                                explore_dir = _rnd.choice(other_dirs)
+                                game._play_dir = explore_dir
+                            # Try to gather adjacent resource instead
+                            for rx_str, ry_str in res_matches:
+                                rx, ry = int(rx_str), int(ry_str)
+                                if abs(rx - cx) + abs(ry - cy) <= 1:
+                                    ctx_m = user_msg[user_msg.find(f"({rx},{ry})") - 15:user_msg.find(f"({rx},{ry})") + 15]
+                                    if "石料" in ctx_m:
+                                        fb = [{"type": "mine", "target": {"x": rx, "y": ry}}]
+                                        summary["mines"] += 1; summary["stone"] += 1
+                                    elif "灌木" in ctx_m or "灰木" in ctx_m or "壁生苔" in ctx_m:
+                                        fb = [{"type": "chop", "target": {"x": rx, "y": ry}}]
+                                        summary["chops"] += 1; summary["wood"] += 1
+                                    else:
+                                        fb = [{"type": "mine", "target": {"x": rx, "y": ry}}]
+                                        summary["mines"] += 1
+                                    if fb:
+                                        await game.send_actions(tick, fb)
+                                    break
 
                 end_energy = game.state.get("energy", 100)
 
-                # Drain stale tick frames to update state to latest
+                # Sync position from latest tick frame state
                 while not game._tick_q.empty():
                     try:
                         f = game._tick_q.get_nowait()
                         if "state" in f:
                             game._state = f["state"]
-                            pos = f["state"].get("position")
-                            if pos:
-                                game._play_pos = [pos[0], pos[1]]
                     except asyncio.QueueEmpty:
                         break
 
@@ -647,7 +705,7 @@ def create_mcp_server(game: GameClient) -> Server:
                     f"| 探测 | {summary['scans']} |",
                     f"",
                     f"### 最终状态",
-                    f"- 位置: {getattr(game, '_play_pos', game.state.get('position', '?'))}",
+                    f"- 位置: {game.state.get('position', '?')}",
                     f"- HP: {game.state.get('health', '?')}/{game.state.get('max_health', '?')}",
                     f"- 能量: {game.state.get('energy', '?')}/100",
                     f"- 背包: {game.state.get('inventory_summary', '?')}",

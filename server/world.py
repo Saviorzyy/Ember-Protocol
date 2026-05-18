@@ -77,7 +77,9 @@ class World:
         return 0 <= x < W and 0 <= y < H
 
     def _find_spawn_position(self) -> Position:
-        """Find a valid spawn position for a new agent."""
+        """Find a valid spawn position with stone within 5 Manhattan distance."""
+        best_pos = None
+        best_stone_dist = 999
         for _ in range(1000):
             x = random.randint(20, W - 20)
             y = random.randint(SPAWN_Y_RANGE[0], SPAWN_Y_RANGE[1])
@@ -90,9 +92,36 @@ class World:
                     if agent.drop_pod_pos and agent.drop_pod_pos.dist(pos) < SPAWN_MIN_DISTANCE:
                         too_close = True
                         break
-                if not too_close:
-                    return pos
+                if too_close:
+                    continue
+                # Check stone proximity (曼哈顿距离 ≤5)
+                stone_dist = self._nearest_stone_distance(pos, 10)
+                if stone_dist is not None and stone_dist <= 5:
+                    return pos  # Found ideal position
+                # Track best fallback with closest stone
+                if stone_dist is not None and stone_dist < best_stone_dist:
+                    best_stone_dist = stone_dist
+                    best_pos = pos
+        if best_pos:
+            return best_pos
         return Position(100, 100)
+
+    def _nearest_stone_distance(self, pos: Position, max_dist: int) -> Optional[int]:
+        """Find Manhattan distance to nearest stone tile within max_dist."""
+        for d in range(1, max_dist + 1):
+            for dx in range(-d, d + 1):
+                remaining = d - abs(dx)
+                for sign in (1, -1):
+                    if remaining == 0 and sign == -1:
+                        continue
+                    ny = pos.y + remaining * sign
+                    nx = pos.x + dx
+                    tile = self.get_tile(nx, ny)
+                    if tile is None:
+                        continue
+                    if tile.l2_type == 'stone' and tile.stone_amount > 0:
+                        return d
+        return None
 
     # ── Agent Management ──────────────────────────
     def create_agent(self, agent_id: str, agent_name: str, chassis: dict) -> AgentState:
@@ -118,8 +147,7 @@ class World:
             constitution=constitution,
             agility=agility,
             perception=perception,
-            inventory=[InventoryItem("workbench", 1), InventoryItem("furnace", 1),
-                       InventoryItem("organic_fuel", 5)],
+            inventory=[InventoryItem(item_id, amount) for item_id, amount in INITIAL_ITEMS.items()],
             drop_pod_pos=Position(spawn_pos.x, spawn_pos.y),
             drop_pod_deployed=True,
             tutorial_phase=0,
@@ -333,11 +361,17 @@ class World:
         pn_id = f"pn-{structure_id}"
         self.power_nodes.pop(pn_id, None)
 
-        # Drop partial materials
-        costs = BUILD_COSTS.get(structure.building_type.value, {})
-        for item_id, cost in costs.items():
-            refund = max(1, cost // 2)
-            self._add_ground_item(structure.position.x, structure.position.y, item_id, refund)
+        # Drop building item or partial materials
+        btype = structure.building_type.value
+        if btype in ("workbench", "furnace"):
+            # Drop the building item itself (like Minecraft) for relocation
+            self._add_ground_item(structure.position.x, structure.position.y, btype, 1)
+        else:
+            # Drop partial materials for other structures
+            costs = BUILD_COSTS.get(btype, {})
+            for item_id, cost in costs.items():
+                refund = max(1, cost // 2)
+                self._add_ground_item(structure.position.x, structure.position.y, item_id, refund)
 
         self._recompute_enclosures()
         self._log_event("structure_destroyed", {"id": structure_id, "type": structure.building_type.value})
@@ -534,6 +568,12 @@ class World:
         names = {"copper": "铜", "iron": "铁", "uranium": "铀", "gold": "金"}
         return names.get(ore_type, ore_type)
 
+    @staticmethod
+    def _ore_to_item_id(ore_type: str) -> str:
+        """Map terrain ore_type to inventory item ID."""
+        mapping = {"copper": "raw_copper", "iron": "raw_iron", "gold": "raw_gold", "uranium": "uranium_ore"}
+        return mapping.get(ore_type, ore_type)
+
     # ── Event Logging ─────────────────────────────
     def _log_event(self, event_type: str, data: dict):
         self.event_log.append({"tick": self.tick_number, "type": event_type, **data})
@@ -595,7 +635,8 @@ class World:
 
         all_actions.sort(key=lambda x: _priority(x[2].get("type", "")))
 
-        moved_agents: set[str] = set()  # agents who already moved this tick
+        moved_counts: dict[str, int] = {}  # agent_id -> moves used this tick
+        move_speeds: dict[str, int] = {}  # agent_id -> cached move_speed
 
         for agent_id, action_index, action in all_actions:
             agent = self.agents.get(agent_id)
@@ -607,21 +648,24 @@ class World:
                 continue
 
             atype = action.get("type", "")
-            # Only one successful move per tick per agent — prevents jitter from conflicting moves
-            if atype in ("move", "move_to") and agent_id in moved_agents:
-                all_results[agent_id].append({
-                    "action_index": action_index, "type": atype,
-                    "success": False, "error_code": "ALREADY_MOVED",
-                    "detail": "本tick已移动，忽略额外移动指令"
-                })
-                continue
+            # Allow up to move_speed() moves per tick (AGI affects speed)
+            if atype in ("move", "move_to"):
+                if agent_id not in move_speeds:
+                    move_speeds[agent_id] = agent.move_speed()
+                if moved_counts.get(agent_id, 0) >= move_speeds[agent_id]:
+                    all_results[agent_id].append({
+                        "action_index": action_index, "type": atype,
+                        "success": False, "error_code": "ALREADY_MOVED",
+                        "detail": f"本tick已移动{move_speeds[agent_id]}次，已达移速上限"
+                    })
+                    continue
 
             result = self._settle_action(agent, action)
             result["action_index"] = action_index
             all_results[agent_id].append(result)
 
             if atype in ("move", "move_to") and result.get("success"):
-                moved_agents.add(agent_id)
+                moved_counts[agent_id] = moved_counts.get(agent_id, 0) + 1
 
         return dict(all_results)
 
@@ -685,6 +729,7 @@ class World:
         old_pos = (agent.position.x, agent.position.y)
         agent.position = Position(nx, ny)
         self._log_event("agent_move", {"agent_id": agent.agent_id, "from": list(old_pos), "to": [nx, ny], "energy": agent.energy})
+        self._log_change("agent_move", agent_id=agent.agent_id, from_pos=list(old_pos), to_pos=[nx, ny])
         return {"type": "move", "success": True, "detail": f"移动到 ({nx}, {ny})"}
 
     def _do_move_to(self, agent: AgentState, action: dict) -> dict:
@@ -749,7 +794,7 @@ class World:
 
         # Check if ore present and requires hardness
         if tile.ore_type:
-            ore_hardness = RESOURCE_HARDNESS.get(tile.ore_type, 5)
+            ore_hardness = RESOURCE_HARDNESS.get(self._ore_to_item_id(tile.ore_type), 5)
             if max_hardness < ore_hardness:
                 ore_name = self._ore_name(tile.ore_type)
                 return {"type": "mine", "success": False, "error_code": "TOOL_REQUIRED",
@@ -773,8 +818,9 @@ class World:
         if tile.ore_type and tile.ore_amount > 0:
             tile.ore_amount -= 1
             ore_amount = max(1, int(1 * (1 + bonus) * con_modifier))
-            self.add_item(agent, tile.ore_type, ore_amount)
-            ore_result = tile.ore_type
+            ore_item_id = self._ore_to_item_id(tile.ore_type)
+            self.add_item(agent, ore_item_id, ore_amount)
+            ore_result = ore_item_id
             result_detail += f", {self._ore_name(tile.ore_type)}矿×{ore_amount}"
 
         # Stone depleted?
@@ -835,11 +881,20 @@ class World:
             tile.veg_yield = 0
             agent.energy -= ENERGY_CHOP
             self.add_item(agent, "wood", wood_yield)
+
+            # Small organic_fuel drop chance per vegetation type
+            fuel_chance = {"ashbush": 0.25, "wallmoss": 0.15, "greytree": 0.05}.get(veg, 0)
+            if fuel_chance > 0 and random.random() < fuel_chance:
+                self.add_item(agent, "organic_fuel", 1)
+                fuel_msg = "，获得有机燃料×1"
+            else:
+                fuel_msg = ""
+
             self._log_event("agent_chop", {"agent_id": agent.agent_id, "position": [tx, ty], "resource": veg, "yield": wood_yield})
 
             if held_tool:
                 self._reduce_durability(agent, held_tool)
-            return {"type": "chop", "success": True, "detail": f"采集木质×{wood_yield}"}
+            return {"type": "chop", "success": True, "detail": f"采集木质×{wood_yield}{fuel_msg}"}
         elif veg == 'rubble':
             wood_yield = 1
             # Apply efficiency formula to rubble clearing too
@@ -1431,10 +1486,25 @@ class World:
         tile = self.get_tile(tx, ty) if self.in_bounds(tx, ty) else None
         if not tile or not tile.structure:
             return {"type": "dismantle", "success": False, "error_code": "STRUCTURE_NOT_FOUND", "detail": "该格无建筑"}
-        if agent.position.dist(Position(tx, ty)) > 0:
-            return {"type": "dismantle", "success": False, "error_code": "OUT_OF_RANGE", "detail": "需站在建筑所在格"}
         if agent.energy < ENERGY_DISMANTLE:
             return {"type": "dismantle", "success": False, "error_code": "INSUFFICIENT_ENERGY", "detail": "能量不足"}
+
+        btype = tile.structure.building_type
+        dist = agent.position.dist(Position(tx, ty))
+
+        # Walls/doors can be dismantled from adjacent tile; other buildings require standing on them
+        if btype in (BuildingType.WALL, BuildingType.DOOR):
+            if dist > 1:
+                return {"type": "dismantle", "success": False, "error_code": "OUT_OF_RANGE",
+                        "detail": f"需站在目标相邻格 (当前距离:{dist})"}
+            # Only owner can dismantle walls/doors
+            if tile.structure.owner_id != agent.agent_id:
+                return {"type": "dismantle", "success": False, "error_code": "NOT_OWNER",
+                        "detail": "只能拆除自己的建筑"}
+        else:
+            if dist > 0:
+                return {"type": "dismantle", "success": False, "error_code": "OUT_OF_RANGE",
+                        "detail": "需站在建筑所在格"}
 
         sid = tile.structure.structure_id
         self._destroy_structure(sid)
@@ -1584,10 +1654,22 @@ class World:
             "attributes": {"constitution": agent.constitution, "agility": agent.agility,
                            "perception": agent.perception},
             "held_item": agent.equipment.main_hand,
+            "equipment": {
+                "main_hand": agent.equipment.main_hand,
+                "off_hand": agent.equipment.off_hand,
+                "armor": agent.equipment.armor,
+            },
             "backup_count": agent.backup_count,
             "inventory_summary": self._inventory_summary(agent),
+            "inventory": [{"item_id": i.item_id, "amount": i.amount, "durability": i.durability}
+                          for i in agent.inventory],
             "tutorial_phase": agent.tutorial_phase,
+            "tutorial_skip_count": agent.tutorial_skip_count,
             "radiation_debuff": agent.radiation_debuff,
+            "drop_pod_pos": agent.drop_pod_pos.to_tuple() if agent.drop_pod_pos else None,
+            "drop_pod_deployed": agent.drop_pod_deployed,
+            "last_action_tick": agent.last_action_tick,
+            "creature_kills": agent.creature_kills,
         }
 
     def _inventory_summary(self, agent: AgentState) -> str:
@@ -1819,6 +1901,28 @@ class World:
                 if agent.health <= 0:
                     self._handle_death(agent)
 
+        # Drop pod shield passive HP regen
+        for agent in self.agents.values():
+            if agent.online and not agent.is_dead() and agent.drop_pod_pos and agent.drop_pod_deployed:
+                dp = agent.drop_pod_pos
+                if abs(agent.position.x - dp.x) + abs(agent.position.y - dp.y) <= DROP_POD_SHIELD_RANGE:
+                    old_hp = agent.health
+                    agent.health = min(agent.max_health, agent.health + HP_DROP_POD_SHIELD_REGEN)
+                    actual_heal = agent.health - old_hp
+                    if actual_heal > 0:
+                        self._log_event("pod_shield_regen", {
+                            "agent_id": agent.agent_id,
+                            "heal": actual_heal,
+                            "hp_remaining": agent.health,
+                        })
+                        self.tick_notifications[agent.agent_id].append({
+                            "type": "pod_shield_regen",
+                            "heal": actual_heal,
+                            "hp_remaining": agent.health,
+                            "source": "drop_pod_shield",
+                            "detail": f"降落仓护盾被动恢复 +{actual_heal}HP",
+                        })
+
         # Solar energy recovery for all agents
         for agent in self.agents.values():
             if agent.online and not agent.is_dead():
@@ -1870,6 +1974,7 @@ class World:
                 if tile and tile.passable:
                     # Move is free
                     agent.position = Position(nx, ny)
+                    self._log_change("agent_move", agent_id=agent.agent_id, to_pos=[nx, ny])
                 else:
                     agent.status = ActionStatus.IDLE
                     agent.action_target = None
@@ -1952,6 +2057,11 @@ class World:
                 if tile.regrow_timer is None:
                     tile.regrow_timer = 0
                 tile.regrow_timer += 1
+                # Don't regrow if tile now has a structure or stone (player built on it)
+                if tile.structure or (tile.l2_type == 'stone' and tile.stone_amount > 0):
+                    tile.regrow_timer = None
+                    to_remove.append(pos)
+                    continue
                 if tile.regrow_timer >= TREE_REGROW_TICKS:
                     # Regrow the vegetation
                     tile.veg_type = original_veg
@@ -2018,6 +2128,15 @@ class World:
                 creature.aggro_list.clear()
 
             if not creature.aggro_list:
+                # Idle wander — passive creatures move randomly when no threat
+                if random.random() < 0.03:  # ~3% per tick
+                    dx, dy = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0)])
+                    nx, ny = creature.position.x + dx, creature.position.y + dy
+                    if self.in_bounds(nx, ny):
+                        tile = self.get_tile(nx, ny)
+                        if tile and tile.passable and not tile.structure and tile.l1 not in (Terrain.WATER, Terrain.TRENCH):
+                            if tile.l2_type != 'stone' or tile.stone_amount <= 0:
+                                creature.position = Position(nx, ny)
                 continue
 
             # Process first valid aggro target

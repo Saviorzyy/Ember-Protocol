@@ -183,27 +183,23 @@ class WSManager:
                                 break
 
                     elif phase == 1:
-                        # Phase 1: 走出降落仓护盾 — successful move or build or mine
-                        has_move = any(r.get("type") == "move" and r.get("success") for r in agent_results)
-                        has_mine = any(r.get("type") == "mine" and r.get("success") for r in agent_results)
+                        # Phase 1: 走出降落仓护盾 — must build to graduate
                         has_build = any(r.get("type") == "build" and r.get("success") for r in agent_results)
-                        if has_move or has_mine or has_build:
+                        if has_build:
                             agent.tutorial_phase = 2
                             progressed = True
 
                     elif phase == 2:
-                        # Phase 2: 建造与合成 — build or mine or craft
-                        has_build = any(r.get("type") == "build" and r.get("success") for r in agent_results)
-                        has_mine = any(r.get("type") == "mine" and r.get("success") for r in agent_results)
+                        # Phase 2: 建造与合成 — must craft something
                         has_craft = any(r.get("type") == "craft" and r.get("success") for r in agent_results)
-                        if has_build or has_mine or has_craft:
+                        if has_craft:
                             agent.tutorial_phase = 3
                             progressed = True
 
                     elif phase == 3:
-                        # Phase 3: 建造与庇护 — build walls/door
-                        has_build = any(r.get("type") == "build" and r.get("success") for r in agent_results)
-                        if has_build:
+                        # Phase 3: 建造与庇护 — must build wall or door
+                        has_build_wall = any(r.get("type") == "build" and r.get("success") for r in agent_results)
+                        if has_build_wall:
                             agent.tutorial_phase = 4
                             progressed = True
 

@@ -1814,6 +1814,21 @@ Solar Array ──(charges)──→ Power Node ──(powers)──→ Workbenc
 
 > ⚠️ **Note**: Weather changes don't auto-interrupt movement. If a radiation storm hits while traveling, the agent just takes damage each tick — must decide whether to continue or find shelter.
 
+### 7.9a Area Radiation UI Visual Feedback
+
+**Two radiation mechanisms have distinct visual representations on the UI:**
+
+| Radiation Type | Map Effect | Status Bar Indicator |
+|---------------|-----------|---------------------|
+| **Area Radiation (persistent)** | Floating yellow-green **fog/cloud patches** on the map, denser near poles, nearly absent at center. Clouds drift slowly horizontally with gentle pulsing | "☢️ 区域辐射" in status bar with tooltip "Persistent area radiation: intensity increases with Y-distance from center" |
+| **Radiation Storm (weather event)** | Green particle fall animation + red pulsing flash overlay | "☢️ 辐射风暴" in status bar |
+
+**Design notes**:
+- Area radiation uses fog/cloud patches to represent localized, pervasive radiation zones rather than uniform coverage
+- Cloud spawn density = `lerp(0, 0.30, w)`, matching the radiation probability curve, where `w = abs(y-100)/100`
+- Each cloud is a radial gradient circle (brighter at center → transparent at edges), drifting left to simulate air currents
+- Yellow-green fog visually distinguishes chronic area radiation from the storm's red pulsing flash
+
 ### 7.10 Relationship System
 
 Agent relationships are not hard-coded but **emerge** from interaction behaviors:

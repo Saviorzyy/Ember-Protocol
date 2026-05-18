@@ -64,6 +64,7 @@ HP_BASE = 70
 HP_PER_CON = 20
 HP_REPAIR_KIT = 30
 HP_DROP_POD_REPAIR = 50
+HP_DROP_POD_SHIELD_REGEN = 10
 
 # ── Power Node ───────────────────────────────────
 POWER_NODE_CAPACITY = 100

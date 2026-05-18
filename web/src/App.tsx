@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import GameMap from './components/GameMap'
 import AgentPanel from './components/AgentPanel'
+import AgentList from './components/AgentList'
 import RegisterForm from './components/RegisterForm'
 import EventLog from './components/EventLog'
 
@@ -68,13 +69,20 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [agentType, setAgentType] = useState<string>('mcp')
   const [sseConnected, setSseConnected] = useState(false)
+  const [showPrompt, setShowPrompt] = useState(false)
   // mcp = Claude/Hermes/Cursor (MCP protocol), skill = OpenClaw/standalone
 
-  // Restore token from sessionStorage on mount
+  // Restore token + regData from sessionStorage on mount
   useEffect(() => {
     const stored = getStoredToken()
     if (stored) {
       setToken(stored)
+    }
+    const storedReg = sessionStorage.getItem('ember_reg_data')
+    if (storedReg) {
+      try {
+        setRegData(JSON.parse(storedReg))
+      } catch (e) {}
     }
   }, [])
 
@@ -157,11 +165,22 @@ export default function App() {
         const data = JSON.parse(e.data)
         setMapData((prev: any) => {
           if (!prev) return null
-          return {
+          const next = {
             ...prev,
             ...(data.structures ? { structures: data.structures } : {}),
             ...(data.creatures ? { creatures: data.creatures } : {}),
           }
+          // Merge individual tile updates (resource depletion, etc.)
+          if (data.tiles && data.tiles.length > 0) {
+            const tiles = prev.tiles.map((row: any[]) => [...row])
+            for (const t of data.tiles) {
+              if (tiles[t.y] && tiles[t.y][t.x]) {
+                tiles[t.y][t.x] = t
+              }
+            }
+            next.tiles = tiles
+          }
+          return next
         })
       } catch (err) {}
     })
@@ -184,6 +203,15 @@ export default function App() {
       es.close()
     }
   }, [fetchStatus, fetchMap, fetchAgents, fetchEvents])
+
+  // Keep selectedAgent in sync when agents array updates via SSE
+  useEffect(() => {
+    setSelectedAgent(prev => {
+      if (!prev) return null
+      const updated = agents.find(a => a.agent_id === prev.agent_id)
+      return updated || prev
+    })
+  }, [agents])
 
   // ── Registration ─────────────────────────────
 
@@ -210,7 +238,7 @@ export default function App() {
     const torsoTier = chassis.torso?.tier || 'mid'
     const locoTier = chassis.locomotion?.tier || 'low'
 
-    setRegData({
+    const regInfo = {
       agent_name: name,
       agent_id: agentId,
       game_token: gameToken,
@@ -219,7 +247,10 @@ export default function App() {
       loco: locoTier,
       server: 'ws://localhost:8765',
       spawn_location: data.spawn_location,
-    })
+    }
+    sessionStorage.setItem('ember_reg_data', JSON.stringify(regInfo))
+    setRegData(regInfo)
+    setShowPrompt(true)
     setShowRegister(false)
 
     // Re-fetch protected data now that we have a token
@@ -255,7 +286,9 @@ export default function App() {
             <>
               <span>⏱ Tick {status.tick}</span>
               <span>{status.day_phase === 'day' ? '☀️' : status.day_phase === 'night' ? '🌙' : '🌅'} {status.day_phase}</span>
-              <span>{status.weather === 'radiation_storm' ? '☢️ 辐射风暴' : '🌤 正常'}</span>
+              <span title="常驻区域辐射: Y轴距离中心越远辐射越强">
+                {status.weather === 'radiation_storm' ? '☢️ 辐射风暴' : '☢️ 区域辐射'}
+              </span>
               <span>👤 {status.agents_online}/{status.agents_total} 在线</span>
               <span>🏗 {status.structures} 建筑</span>
             </>
@@ -270,6 +303,19 @@ export default function App() {
           >
             + 创建角色
           </button>
+          {regData && (
+            <button
+              onClick={() => setShowPrompt(true)}
+              title="查看连接信息和 Token"
+              style={{
+                background: '#2a3040', color: '#0cf', border: '1px solid #0cf',
+                padding: '6px 12px', borderRadius: 4, cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: 11,
+              }}
+            >
+              🔗 连接
+            </button>
+          )}
         </div>
       </div>
 
@@ -283,6 +329,8 @@ export default function App() {
             selectedAgent={selectedAgent}
             onSelectAgent={setSelectedAgent}
             weather={status?.weather || 'calm'}
+            dayPhase={status?.day_phase || 'day'}
+            events={events}
           />
         </div>
 
@@ -292,12 +340,13 @@ export default function App() {
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}>
           <AgentPanel agent={selectedAgent} />
+          <AgentList agents={agents} selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} />
           <EventLog events={events} />
         </div>
       </div>
 
       {/* Prompt-only mode — Copy prompt to agent, agent connects with real token */}
-      {token && regData && (() => {
+      {showPrompt && regData && (() => {
         const skillRawUrl = 'https://raw.githubusercontent.com/Saviorzyy/Ember-Protocol-Player/main/ember_skill.py'
         const mcpRawUrl = 'https://raw.githubusercontent.com/Saviorzyy/Ember-Protocol-Player/main/ember_mcp_server.py'
         const name = regData.agent_name
@@ -387,7 +436,7 @@ export default function App() {
               {copied ? '✅ 已复制！' : '📋 一键复制 Prompt'}
             </button>
 
-            <button onClick={() => { setToken(''); setRegData(null); setCopied(false) }} style={{
+            <button onClick={() => { setShowPrompt(false); setCopied(false) }} style={{
               width: '100%', padding: '8px', background: '#333', color: '#ccc',
               border: 'none', borderRadius: 4, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12,
             }}>

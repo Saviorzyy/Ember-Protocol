@@ -73,34 +73,30 @@ class SSEManager:
             "creatures": len(world.creatures),
         })
 
-        if not world.changes:
-            return
-
         change_types = {c.get("type", "") for c in world.changes}
 
-        # ── agent_update ──
-        if any("agent" in ct for ct in change_types):
-            agents_data = []
-            for aid, a in world.agents.items():
-                agents_data.append({
-                    "agent_id": aid,
-                    "name": a.agent_name,
-                    "position": a.position.to_tuple(),
-                    "health": a.health,
-                    "max_health": a.max_health,
-                    "energy": a.energy,
-                    "max_energy": a.max_energy,
-                    "online": a.online,
-                    "held": a.equipment.main_hand or "空手",
-                    "off_hand": a.equipment.off_hand,
-                    "armor": a.equipment.armor,
-                    "backup_count": a.backup_count,
-                    "tutorial_phase": a.tutorial_phase,
-                    "status": a.status.value,
-                })
-            await self.broadcast("agent_update", {"agents": agents_data})
+        # ── agent_update (always, so HP/energy from passive regen/radiation is reflected) ──
+        agents_data = []
+        for aid, a in world.agents.items():
+            agents_data.append({
+                "agent_id": aid,
+                "name": a.agent_name,
+                "position": a.position.to_tuple(),
+                "health": a.health,
+                "max_health": a.max_health,
+                "energy": a.energy,
+                "max_energy": a.max_energy,
+                "online": a.online,
+                "held": a.equipment.main_hand or "空手",
+                "off_hand": a.equipment.off_hand,
+                "armor": a.equipment.armor,
+                "backup_count": a.backup_count,
+                "tutorial_phase": a.tutorial_phase,
+                "status": a.status.value,
+            })
+        await self.broadcast("agent_update", {"agents": agents_data})
 
-        # ── map_update (structures / creatures) ──
+        # ── map_update (structures / creatures / tiles) ──
         map_keys = {"structure_built", "structure_destroyed", "resource_deplete",
                     "weather_change", "day_phase", "creature_spawned",
                     "creature_killed"}
@@ -120,9 +116,29 @@ class SSEManager:
                     "x": c.position.x, "y": c.position.y,
                     "hp": c.hp, "max_hp": c.max_hp,
                 })
+            # Collect tile changes (resource depletion, veg changes)
+            tiles = []
+            for c in world.changes:
+                ct = c.get("type")
+                if ct == "resource_deplete":
+                    tile_pos = c.get("tile")
+                    if tile_pos:
+                        tx, ty = tile_pos
+                        tile = world.get_tile(tx, ty)
+                        if tile:
+                            tiles.append({
+                                "x": tx, "y": ty,
+                                "l1": tile.l1.value,
+                                "l2": tile.l2_type,
+                                "stone": tile.stone_amount > 0,
+                                "ore": tile.ore_type if tile.ore_exposed else "",
+                                "veg": tile.veg_type,
+                                "structure": tile.structure.building_type.value if tile.structure else "",
+                            })
             await self.broadcast("map_update", {
                 "structures": structs,
                 "creatures": creatures,
+                "tiles": tiles,
             })
 
         # ── event (recent game events) ──

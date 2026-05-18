@@ -103,7 +103,7 @@ class AgentState:
         return self.status in (ActionStatus.IDLE, ActionStatus.MOVING)
 
     def view_range(self, day_phase: DayPhase, weather: Weather, terrain_bonus: int = 0) -> int:
-        base = 1 + self.perception if day_phase in (DayPhase.NIGHT,) else 3 + self.perception
+        base = 2 + self.perception * 2 if day_phase in (DayPhase.NIGHT,) else 4 + self.perception * 2
         if weather == Weather.RADIATION_STORM:
             base -= 2
         base += terrain_bonus
